@@ -228,3 +228,37 @@ keyboard.
 No. It is encrypted — high-entropy binary, not XML. Only Lenovo's own `Download.exe`
 can decode it, because it carries the key. The ABL offsets used in this repository
 came from an older package that shipped a readable descriptor, not from this one.
+
+### 34. How do I get the device from 900E to 9008?
+
+Send `HELLO_RSP` with `mode=3` (COMMAND), then `SWITCH_MODE` (`0x0C`, 12 bytes) with
+`mode=0` (IMAGE_TX_PENDING), then `HELLO_RSP` with `mode=0`, then `DONE`.
+
+```bash
+python scripts/sahara_bump.py
+```
+
+The switch takes under a millisecond, but USB re-enumeration took **20.8 s** in the
+recorded session — so wait 30–40 s, not 2. A fresh `HELLO_REQ` in reply to the
+switch is the success signal. Full sequence, seven variants and eight pitfalls:
+[`14-edl-mode-switch.md`](14-edl-mode-switch.md).
+
+### 35. Can I skip the bump and upload directly on 900E?
+
+Not usefully. `900E` is `mode=2` (MEMORY_DEBUG), which is a RAM-dump mode. It will
+accept a transfer, but a zero-byte one counts as success, so you can get a "clean"
+result having sent nothing. The `END_TRANSFER` you see is not evidence the
+programmer loaded.
+
+### 36. Why does my bump script time out even though it worked?
+
+Because re-enumeration is slow. Measured: switch at `t+0.57`, `9008` visible at
+`t+21.36`. Scripts with a 2–3 second timeout report failure while the device is
+still switching, and then leave it in an intermediate state that makes the next
+attempt harder.
+
+### 37. What if the first packet on 900E is `END_TRANSFER`, not `HELLO`?
+
+A previous session ended badly. Send `SAHARA_RESET` (`0x07`), read the
+`RESET_RSP`, drain, then re-read — you will get a fresh `HELLO`. Do **not** send
+`HELLO_RSP` to a pending `END_TRANSFER`; it does nothing useful.

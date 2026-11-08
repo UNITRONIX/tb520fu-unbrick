@@ -21,12 +21,14 @@ Everything else is background. None of it will get you write access.
 ### "I want to understand the protocol work"
 
 1. [`00-glossary.md`](00-glossary.md) — every acronym used anywhere in this repo.
-2. [`03-sahara-protocol.md`](03-sahara-protocol.md) — the handshake and upload,
+2. [`14-edl-mode-switch.md`](14-edl-mode-switch.md) — getting from crashdump to real
+   EDL. Read this first: every session starts here.
+3. [`03-sahara-protocol.md`](03-sahara-protocol.md) — the handshake and upload,
    as measured, including the framing bug that cost the most time.
-3. [`04-melf-format.md`](04-melf-format.md) — the container, image by image.
-4. [`06-signing.md`](06-signing.md) — what qtestsign actually does (less than
+4. [`04-melf-format.md`](04-melf-format.md) — the container, image by image.
+5. [`06-signing.md`](06-signing.md) — what qtestsign actually does (less than
    people assume), and why it was not the blocker.
-5. [`07-dead-ends.md`](07-dead-ends.md) — 20+ attempts, each with the reason it
+6. [`07-dead-ends.md`](07-dead-ends.md) — 30+ attempts, each with the reason it
    failed. Read this before proposing an idea.
 
 ### "I want the story in order"
@@ -75,6 +77,7 @@ Everything else is background. None of it will get you write access.
 | `11-faq.md` | Twenty short questions and answers. |
 | `12-bootloader-unlock.md` | The HTTP unlock endpoint: URL format, file contents, per-serial signing, unlocking procedure and caveats. |
 | `13-hardware-and-drivers.md` | Complete hardware inventory: SoC naming, 340 kernel modules, board-specific drivers, firmware blobs by subsystem, storage layout, and the exact Magisk rooting procedure. |
+| `14-edl-mode-switch.md` | The 900E → 9008 transition: the working sequence with log evidence, seven variants including those that failed, timing, and eight pitfalls. |
 
 ---
 

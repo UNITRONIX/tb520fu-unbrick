@@ -55,22 +55,15 @@ except ImportError:
     raise SystemExit(2)
 
 from sahara_upload import (
-    CMD_DONE_REQ,
-    CMD_END_TRANSFER,
-    CMD_HELLO_REQ,
-    CMD_HELLO_RSP,
-    CMD_READ_DATA,
-    CMD_READ_DATA_64,
     PID_CRASHDUMP,
     PID_EDL,
-    VID,
     Link,
     close_device,
     device_present,
-    hello_rsp,
     open_device,
     upload,
 )
+from sahara_bump import bump_once
 
 #: Sahara never requests the trailing padding, so a complete transfer is less than
 #: the file size. This is the count the SM8650 devprg actually yields.
@@ -105,75 +98,14 @@ def hexdump(data: bytes, limit: int = 512) -> str:
 # Mode switch: crashdump (900e) -> genuine EDL (9008)
 # ---------------------------------------------------------------------------
 def bump_to_edl(timeout_s: float = 40.0) -> bool:
-    """Crashdump -> EDL.
+    """Crashdump -> EDL, delegating to the measured implementation.
 
-    The sequence, as it works on this device:
-
-        HELLO (mode=2)  ->  HELLO_RSP with mode=COMMAND
-        CMD_MODE_SWITCH ->  device sends HELLO again in IMAGE_TX_PENDING
-        HELLO_RSP       ->  END_TRANSFER status 0
-        DONE
-
-    After that the device re-enumerates as 9008.
+    The sequence lives in sahara_bump.py, which is the version with log evidence
+    behind it. Duplicating it here once produced a malformed switch packet (the
+    command id was embedded twice in the payload), so this is a call, not a copy.
+    See docs/14-edl-mode-switch.md.
     """
-    if device_present(PID_EDL):
-        return True
-
-    dev = open_device(PID_CRASHDUMP, retries=3, delay=0.5)
-    if dev is None:
-        return False
-
-    link = Link(dev, verbose=False)
-    try:
-        pkt = link.read_packet(6000, retries=2)
-        if pkt is None:
-            log("  bump: no HELLO on 900e")
-            return False
-        cmd = struct.unpack_from("<I", pkt, 0)[0]
-        if cmd != CMD_HELLO_REQ:
-            log(f"  bump: expected HELLO, got 0x{cmd:X}")
-            return False
-        version = struct.unpack_from("<I", pkt, 8)[0]
-        log(f"  bump: HELLO ver={version} mode=2")
-
-        # Ask for command mode first
-        link.write(hello_rsp(version, mode=3), zlp=False)
-        link.read_packet(2000, retries=1)
-
-        # Mode switch request: cmd_execute with the switch sub-command.
-        # Payload: 4-byte sub-command id 0x0C (MODE_SWITCH) then the target mode.
-        switch_payload = struct.pack("<II", 0x0C, 0) + struct.pack("<I", 0)
-        link.write(struct.pack("<II", 0x0C, 8 + len(switch_payload)) + switch_payload,
-                   zlp=False)
-        reply = link.read_packet(3000, retries=1)
-        if reply is not None:
-            rcmd = struct.unpack_from("<I", reply, 0)[0]
-            log(f"  bump: mode-switch reply cmd=0x{rcmd:X}")
-            if rcmd == CMD_HELLO_REQ:
-                v2 = struct.unpack_from("<I", reply, 8)[0]
-                link.write(hello_rsp(v2), zlp=False)
-                end = link.read_packet(3000, retries=1)
-                if end is not None:
-                    ecmd = struct.unpack_from("<I", end, 0)[0]
-                    if ecmd == CMD_END_TRANSFER:
-                        status = struct.unpack_from("<I", end, 8)[0]
-                        log(f"  bump: END status=0x{status:X}")
-                        if status == 0:
-                            link.write(struct.pack("<II", CMD_DONE_REQ, 8), zlp=False)
-    except Exception as exc:  # noqa: BLE001
-        log(f"  bump exception {type(exc).__name__}: {exc}")
-    finally:
-        close_device(dev)
-
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        if device_present(PID_EDL):
-            time.sleep(0.2)
-            log("  bump: device re-enumerated as 9008")
-            return True
-        time.sleep(0.05)
-    log("  bump: 9008 never appeared")
-    return False
+    return bump_once(timeout_s=timeout_s, do_reset=True)
 
 
 # ---------------------------------------------------------------------------

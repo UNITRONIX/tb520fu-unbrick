@@ -104,13 +104,19 @@ protocol means. This distinction is not obvious and matters a great deal:
 | `mode` | Meaning | Observed when |
 |---|---|---|
 | `0` | `SAHARA_MODE_IMAGE_TX_PENDING` | genuine EDL, from PBL |
+| `1` | `SAHARA_MODE_IMAGE_TX_COMPLETE` | after a completed transfer |
 | `2` | `SAHARA_MODE_MEMORY_DEBUG` | crashdump — the "image" is a RAM dump request, not a programmer load |
+| `3` | `SAHARA_MODE_COMMAND` | intermediate state during a mode switch |
 
 `HELLO ver=3 mode=0` is what you want: a clean EDL session straight from PBL.
 
-`HELLO ver=2 mode=2` is crashdump. It is *usable* — the bump sequence below
+`HELLO ver=2 mode=2` is crashdump. It is *usable* — the mode-switch sequence
 converts it — but be aware that in this mode the device will acknowledge a
 **zero-byte** transfer as success. See §7.
+
+Getting from `mode=2` to `mode=0` is a procedure in its own right, with its own
+pitfalls and a 20-second re-enumeration. It is documented separately in
+[`14-edl-mode-switch.md`](14-edl-mode-switch.md).
 
 ### Version
 

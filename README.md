@@ -256,6 +256,7 @@ docs/
   11-faq.md                   short answers to the obvious questions
   12-bootloader-unlock.md     unlock file over HTTP: endpoint, contents, caveats
   13-hardware-and-drivers.md  silicon, kernel modules, firmware, rooting procedure
+  14-edl-mode-switch.md       the 900E → 9008 transition: sequence, variants, pitfalls
 session-notes/                raw translated session logs, unedited
 scripts/                      the tooling, in English, path-parameterised
 ```
@@ -290,6 +291,7 @@ All scripts are standalone, take explicit paths, and print English logs. See
 | Script | Purpose |
 |---|---|
 | `get_unlock_file.py` | fetch the bootloader unlock file for a serial over HTTP |
+| `sahara_bump.py` | move the device from crashdump (900e) to EDL (9008) |
 | `melf_tool.py` | inspect, split, patch and verify a `melf` container |
 | `analyze_melf_map.py` | map data regions, compare embedded Firehose with the standalone ELF |
 | `find_hashes.py` | hunt for per-image hashes inside the container |

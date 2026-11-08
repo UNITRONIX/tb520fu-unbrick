@@ -64,6 +64,28 @@ does not touch the device.
 
 ---
 
+### `sahara_bump.py` — crashdump to EDL
+
+Moves the device from `05c6:900e` (crashdump) to `05c6:9008` (real EDL), which is
+where a programmer can actually be loaded.
+
+```bash
+python sahara_bump.py                 # wait for 900e, bump, confirm 9008
+python sahara_bump.py --timeout 60    # allow longer for re-enumeration
+python sahara_bump.py --from-9008     # only close a stale IMAGE_TX transfer
+```
+
+Handles the three starting states automatically: `HELLO` pending (normal), `END`
+pending (reset first), and nothing pending (reset, then read). `--from-9008` covers
+the case where the device is already in `IMAGE_TX` and only needs the empty
+`END`/`DONE` exchange.
+
+The measured timing is baked into the defaults: the switch completes in under a
+millisecond, but re-enumeration took **20.8 s**, so the default wait is 40 s.
+Documented in [`../docs/14-edl-mode-switch.md`](../docs/14-edl-mode-switch.md).
+
+---
+
 ### `sahara_codes.py` — the code tables
 
 Every Sahara command and NAK code, with the vendor range above `0x28` clearly
