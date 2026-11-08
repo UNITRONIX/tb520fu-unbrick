@@ -37,14 +37,27 @@ spend two weeks rediscovering the same dead ends.
 | Codename | `lapis` |
 | SoC | Qualcomm **SM8650** ("pineapple") — Snapdragon 8 Gen 3 |
 | GPU | Adreno 750 |
-| Storage | UFS 4.0 |
+| Storage | UFS 4.0, 6 LUNs |
+| Display | 12.7" dual-DSI, 3K, DSC — Tianma or BOE panel, both NT36532 touch |
 | Last known good OS | Android 16, ZUI 18.5.10.037 lineage |
 | Bootloader | unlocked, verified boot `orange` |
 | Partition layout | A/B, current slot `a` |
+| Kernel | GKI **6.1.112**-android14-11 (340 DLKM modules) |
+
+Full silicon inventory, driver list and firmware map:
+[`docs/13-hardware-and-drivers.md`](docs/13-hardware-and-drivers.md).
+
+> **Naming trap.** The SoC is `pineapple` in kernel module names, but every firmware
+> build string says `LANAI` (22 occurrences, zero of `pineapple`). Both are correct —
+> silicon codename versus Qualcomm's board build name. Searching only one finds half
+> the files.
 
 > **Note on the SoC.** Some early community write-ups list `TB520FU` as a MediaTek
 > Helio G99 device. That is wrong for this unit. Everything in this repository
-> assumes Qualcomm SM8650 and the Qualcomm Sahara/Firehose stack.
+> assumes Qualcomm SM8650 and the Qualcomm Sahara/Firehose stack. The SoC appears as
+> `pineapple` in module names and `LANAI` in firmware build strings — same silicon,
+> two naming layers. See
+> [`docs/13-hardware-and-drivers.md`](docs/13-hardware-and-drivers.md) §2.
 
 ---
 
@@ -242,6 +255,7 @@ docs/
   10-hardware-notes.md        the ROCKNIX ABL substitution analysis
   11-faq.md                   short answers to the obvious questions
   12-bootloader-unlock.md     unlock file over HTTP: endpoint, contents, caveats
+  13-hardware-and-drivers.md  silicon, kernel modules, firmware, rooting procedure
 session-notes/                raw translated session logs, unedited
 scripts/                      the tooling, in English, path-parameterised
 ```

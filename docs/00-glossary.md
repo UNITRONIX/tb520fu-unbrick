@@ -162,3 +162,89 @@ The device rejects it after 64 bytes.
 **`xbl_s.melf`** — a 1 117 008 B prefix of the full programmer. Everything up to
 and including the Firehose image, without the DDR-training image. Useful for
 tests, not for writing.
+
+---
+
+## Hardware and drivers
+
+Part numbers and subsystem names. The full inventory, with file sizes and provenance,
+is in [`13-hardware-and-drivers.md`](13-hardware-and-drivers.md).
+
+**`lapis`** — the device codename for `TB520FU`. Appears in `getvar product`, DTB
+filenames, sensor registry names (`lanai_*_lapis.json`) and the Bluetooth NVM file
+`hmtnv20_Lapis.bin`. Three naming layers coexist in one filename there: `lanai`
+(platform), `lapis` (device), `bu52053nvx` (chip).
+
+**`pineapple`** — Qualcomm's platform codename for SM8650. Used in kernel module
+names (`debugcc-pineapple.ko`), audio configs (`mixer_paths_pineapple_*.xml`) and
+upstream Linux.
+
+**`LANAI`** — Qualcomm's build/target name for this board family, used in every
+firmware version string (`BOOT.MXF.2.1-...-LANAI-1`, `TZ.XF.5.28-...`). Count in
+`ver_info.txt`: 22 occurrences of `LANAI`, zero of `pineapple`. Both names are
+correct; searching only one finds half the files.
+
+**GKI** — *Generic Kernel Image*. Android's kernel/module split where the kernel is
+built generically and vendor code ships as loadable modules against an exact version.
+This device is **6.1.112-android14-11**. The consequence that matters: a module built
+for that version loads nowhere else, so a Linux port cannot reuse these `.ko` files.
+
+**DLKM** — *Dynamic Loadable Kernel Modules*. Two partitions here:
+`system_dlkm` (60 modules) and `vendor_dlkm` (280 modules).
+
+**`init_boot`** — on a GKI device with boot header v4, the partition that holds the
+**generic ramdisk**, while `boot` holds the kernel. Measured on this device:
+`boot.img` has `kernel_size 35 289 600` and `ramdisk_size 0`; `init_boot.img` has
+`kernel_size 0` and `ramdisk_size 2 099 409`. This is why Magisk is patched into
+`init_boot` and patching `boot` does nothing useful.
+
+**`header_version 4`** — the boot image header revision. `header_size` 1584. Determines
+which `mkbootimg`/`unpack_bootimg` options apply.
+
+**DSC** — *Display Stream Compression*. The panels use it (`lapis_tianma_nt36532_dsc_3k_video`),
+which is why a naive panel port produces a black screen rather than a wrong picture.
+
+**NT36532** — the Novatek touch controller part number. Both panel variants use it.
+Handles the active stylus as well as fingers — there is no separate Wacom stack.
+
+**`nvt_36xxx.ko` / `nt36xxx-i2c.ko`** — the Novatek driver, in two transport variants.
+Carries pen support (`nvt_pen_max_pressure`, `pen_2d_raw_tip_x`).
+
+**`goodix_ts.ko` vs `goodixfp64.mbn`** — touch versus fingerprint. Different silicon,
+both Goodix, easy to confuse. The fingerprint runs in TEE and has no Linux support.
+
+**`lenovo_keyboard.ko`** — the folio keyboard driver. It is a **UART** driver with
+GPIO wake lines (`uart_pack_data`, `uart_wake_gpio`), not USB or I²C. The pogo pins
+carry a serial link.
+
+**`bu52053nvx`** — the hall sensor chip. Drives folio attach and lid detection, via
+`hall_mod.ko`.
+
+**`kiwi_v2`** — the Wi-Fi firmware SKU. 85 files under `vendor_firmware_mnt/image/kiwi/`,
+including `amss.bin`, `amss20.bin` and the `bdwlan.e*` board-data set.
+
+**WCN7850 / QCA6750** — the Wi-Fi chip family. `icnss2.ko` references `qca6750`,
+`wcn6450`, `wcn6750`. On Linux this is **ath12k**, and the hard part is converting
+`bdwlan.*` into a matching `board-2.bin`.
+
+**HAMILTON / HMT** — the Bluetooth firmware family (`BTFM.HAMILTON.2.0.1`).
+Files: `hmtbtfw10.tlv`, `hmtbtfw20.tlv`, and the board NVM `hmtnv20_Lapis.bin`.
+
+**EVA** — the video encode/decode subsystem (`msm-eva.ko`, `evass.elf`). Separate
+from the camera ISP.
+
+**ICP** — *Image Capture Processor*, part of the camera pipeline (`CAMERA_ICP.elf`).
+
+**CAMSS vs CAMX** — CAMSS is the mainline Linux camera subsystem (CSI/VFE, raw Bayer).
+CAMX is Qualcomm's Android camera stack with the Titan ISP. Linux gets CAMSS only.
+
+**`gen70900`** — the Adreno 750 firmware family: `gen70900_sqe.fw`, `gen70900_aqe.fw`,
+`gmu_gen70900.bin`, `gen70900_zap.mbn`. The numbers are a firmware generation, not a
+part number.
+
+**FBE** — *File-Based Encryption*. `/data` is encrypted per-file with keys unlocked at
+boot. A cold-boot custom initramfs cannot mount it, which is why "Fedora on `/data`"
+failed regardless of the pivot's correctness.
+
+**inlinecrypt** — the f2fs feature implementing FBE on this device. Relevant because it
+is invisible from the host and only shows up when a custom pivot tries to mount `/data`.

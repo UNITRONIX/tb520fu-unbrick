@@ -179,3 +179,52 @@ rather than a server problem. Check: 8 characters, uppercase, no spaces, no `S/N
 prefix. Confirm the value with `adb shell getprop ro.serialno` or
 `fastboot getvar serialno` — and make sure you are using the serial, not the model
 number (`TB520FU`) or the IMEI.
+
+### 28. How do I root this tablet?
+
+Magisk patched into **`init_boot`**, not `boot`. This is a GKI device: measured,
+`boot.img` has a 35 MB kernel and a **zero-byte ramdisk**, while `init_boot.img` has
+a zero-byte kernel and a 2 MB ramdisk. Patching `boot` does nothing useful here.
+
+```bash
+fastboot flash init_boot magisk_patched_init_boot.img
+```
+
+Magisk 30.7 was used and worked: `su -c id` → `uid=0`, context `u:r:magisk:s0`.
+Full procedure with stock checksums in
+[`13-hardware-and-drivers.md`](13-hardware-and-drivers.md) §4.
+
+### 29. Why is the SoC called both `pineapple` and `LANAI`?
+
+`pineapple` is Qualcomm's silicon platform codename for SM8650 — it appears in kernel
+module names (`debugcc-pineapple.ko`) and audio configs. `LANAI` is Qualcomm's
+build/target name for this board family — it appears in every firmware version string.
+
+Counted in `ver_info.txt`: 22 hits for `LANAI`, zero for `pineapple`. Both are
+correct. If you are hunting files, search both, or you will miss half of them.
+
+### 30. Which touch controller and stylus does it use?
+
+Novatek **NT36532** for both, in one driver (`nvt_36xxx.ko`). The stylus is an
+integrated active pen, not a separate Wacom digitizer — which is why there is no
+separate pen firmware blob. There are two panel vendors (Tianma and BOE), so the kit
+carries four firmware files and you must match the one for your panel.
+
+### 31. Is the folio keyboard USB?
+
+No — it is **UART** over the pogo pins, with GPIO wake lines. `lenovo_keyboard.ko`
+contains `uart_pack_data`, `uart_wake_gpio`, `uart_wake_irq`. The hall sensor
+(`bu52053nvx`, via `hall_mod.ko`) handles attach and lid detection.
+
+### 32. Can I reuse the stock kernel modules on a mainline kernel?
+
+No. All 340 modules are built for GKI **6.1.112**-android14-11 and load only into
+that exact version. Anything for a Linux port has to be rebuilt or replaced. In
+practice only two drivers are genuinely hard: the display panel and the folio
+keyboard.
+
+### 33. Is the `rawprogram4.x` file readable?
+
+No. It is encrypted — high-entropy binary, not XML. Only Lenovo's own `Download.exe`
+can decode it, because it carries the key. The ABL offsets used in this repository
+came from an older package that shipped a readable descriptor, not from this one.
