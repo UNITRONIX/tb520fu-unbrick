@@ -104,6 +104,13 @@ Whole-blob integrity check. No per-image digest exists in the file under any sta
 algorithm tested, and one 652-byte metadata blob in the wrapper was never decoded, so
 there was nothing to recompute even in principle.
 
+*Correction (2026-11-08): the blob is now decoded.* Its schema is little-endian
+`u16 tag | u16 len` with 4-byte-aligned values, and it contains one digest — a
+**SHA-512 of the wrapper's own 4096-byte payload** (tag `0x8441`), verified
+byte-for-byte. The blob is bit-identical across ROM builds, so it is not a table of
+inner-image digests; those still do not exist anywhere in the file. The dead end
+stands, for a sharper reason. See `04-melf-format.md` §5–6.
+
 ### B3. Build a melf from scratch
 
 Blocked: no description of the structure PBL validates, no hash table format, no

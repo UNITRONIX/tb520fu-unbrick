@@ -174,8 +174,10 @@ in the wrong place to be useful:
 2. **Integrity.** Modifying any image inside the melf fails with `0x21`
    (`HASH_TABLE_AUTH_FAILURE`). The transfer dies at byte 1 109 804, which is
    *before* the replaced Firehose image at 1 117 008 — proving the check covers
-   the entire blob, not the individual images. No per-image digest is stored in the
-   file under any standard algorithm we tested.
+   the entire blob, not the individual images. The only digest physically present in
+   the file is a SHA-512 of the wrapper's own 4096-byte payload (tag `0x8441`,
+   verified byte-for-byte); no per-image digest of the five inner images exists under
+   9 algorithms across 84 candidate regions.
 3. **Runtime.** With the untouched factory programmer, all three earlier layers
    pass and `DONE` is acknowledged — and then nothing. The programmer is accepted
    but never binds Firehose to USB.
@@ -295,6 +297,9 @@ All scripts are standalone, take explicit paths, and print English logs. See
 | `melf_tool.py` | inspect, split, patch and verify a `melf` container |
 | `analyze_melf_map.py` | map data regions, compare embedded Firehose with the standalone ELF |
 | `find_hashes.py` | hunt for per-image hashes inside the container |
+| `tlv_parse.py` | decode the 652-byte wrapper metadata blob (`0x1074`–`0x1300`) |
+| `hash_sweep.py` | exhaustive digest sweep: every program-header segment × 9 algorithms |
+| `verify_tlv.py` | compare the blob across ROM builds; test its hash blocks |
 | `build_signed_melf.py` | rebuild a melf with a substituted image |
 | `sahara_upload.py` | strict-framing raw-libusb Sahara uploader |
 | `banner_capture.py` | upload, then **listen** instead of talking |

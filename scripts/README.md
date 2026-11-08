@@ -146,11 +146,42 @@ python find_hashes.py --melf <ROM_DIR>/image/xbl_s_devprg_ns.melf
 
 It also disassembles the wrapper interior region by region, which is how the
 "`0x1000..0x1300` is empty" claim from an earlier note was found to be wrong: a
-652-byte tag/length metadata blob lives at `0x1074..0x1300` and was never decoded.
+652-byte tag/length metadata blob lives at `0x1074..0x1300`.
 
-Run this before attempting any per-image modification. If it finds no digest, the
-substitution route has nothing to recompute — and read the caveat it prints at the
-end rather than assuming the file contains no metadata at all.
+Run this before attempting any per-image modification. If it finds no digest of the
+inner images, the substitution route has nothing to recompute — but the wrapper
+metadata *does* contain one digest (of itself), so see `tlv_parse.py` and
+`hash_sweep.py` before concluding the file has no hashes at all.
+
+---
+
+### `tlv_parse.py` — decode the wrapper metadata blob
+
+Walks the 652-byte region at `0x1074..0x1300` with the correct schema: little-endian
+`u16 tag | u16 len`, values padded to 4 bytes. Consumes 652/652 bytes and prints the
+full tree, including the `0x8441` digest and the two `0x81FF` blocks.
+
+```bash
+python tlv_parse.py [--melf <path>]
+```
+
+### `hash_sweep.py` — exhaustive digest sweep
+
+Builds a candidate set from every program-header segment of every ELF image (raw,
+`0xFF`-stripped, `0x00`-stripped) plus whole-file and TLV-range variants — 84
+candidates — and tests each against every hash-sized TLV value with 9 algorithms.
+
+Result on TB520FU: exactly one match, `sha512(wrapper ph[0], 4096 B)` == tag `0x8441`.
+Nothing else.
+
+### `verify_tlv.py` — cross-build comparison
+
+Compares the blob (and the whole file) across ZUI 17.5.10.096, ZUI 18.5.10.037 and
+the device backup `stock_18.5_ref`. Reports differing byte counts, the first and last
+difference, and how many differences fall inside the TLV region.
+
+Result: 33 779 differing bytes between builds, **0 inside the TLV**, TLV SHA-256
+identical in all three.
 
 ---
 

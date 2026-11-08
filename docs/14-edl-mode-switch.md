@@ -130,6 +130,27 @@ Log: `bump: COMMAND -> 11`, `bump: switch -> 1`, `bump: after ITX -> 4`.
 
 Note the `11` is `0x0B` in decimal — `SAHARA_CMD_READY`.
 
+### V1b — 12 bytes on the wire: also works (measured 2026-11-08)
+
+`edlclient`'s `cmd_modeswitch` sends **12** bytes
+(`pack("<III", 0x0C, 0xC, mode)`), and a session using it reached the same state:
+
+```
+[   0.089]   bump: HELLO ver=2 mode=2
+[  20.807]   HELLO ver=3 mode=0  <- TRUE EDL from PBL
+[  21.019]   END status=0x0 bytes=1554996/1569028
+```
+
+(`banner_capture.log`; same 20.7 s re-enumeration delay as V1.)
+
+So the trailing zeroes in V1 are **not** what makes the switch work. The declared
+`len=12` is what matters; the device consumes exactly that.
+
+**What is measured and what is not:** 12 bytes has log evidence from two independent
+sessions (`catch2.log`, `banner_capture.log`). The 16-byte form appears in
+`oneshot_2026-11-08.py` but **no log confirms it reached 9008**. So "either is safe"
+is not established — use 12 bytes, which is the form with evidence behind it.
+
 ### V2 — same, via `edlclient`
 
 Identical semantics, using the library's `cmd_modeswitch`:

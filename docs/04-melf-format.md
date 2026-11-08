@@ -70,25 +70,86 @@ ff ff 0c a0 84 83 4c 00 40 84 04 00 05 00 00 00 41 84 40 00 bb 42 9d cd
 ...
 ```
 
-It begins with a plausible big-endian TLV header `tag=0x0182 len=0x0288`, which
-accounts for all 652 bytes (`4 + 0x288`). Within it there is a 64-byte high-entropy
-field (at offset `0x44`, under a `0x8441` tag) that looks like a digest, followed by
-a further 136-byte field under `0x81FF` and a 376-byte field under `0x8080`.
+It begins with a **little-endian** TLV header `tag=0x0182 len=648`, which accounts for
+all 652 bytes (`4 + 648`). Reading it as big-endian (`tag=0x8201 len=34818`) overflows
+the region and is wrong.
 
-**What we know about it:** it is not ASN.1 (no `30 82` in any byte order), its nested
-TLVs do not parse cleanly with a naive 2-byte tag/length walk, and its 64-byte value
-is not a plain sha256/sha384/sha512/sha3/blake2b/crc32 of any obvious byte range of
-this file — all tested.
+**The schema is decoded.** The header is `u16 tag | u16 len`, both little-endian, and
+every value is padded to a 4-byte boundary (`align4`). This is why a naive 8-byte
+tag/length walk failed: it consumed 8-byte headers and never resynchronised.
+`scripts/tlv_parse.py` walks the whole region and consumes **652/652 bytes**:
 
-**What we do not know:** what it describes. It is plausibly a descriptor list, but we
-never decoded it, and we do not claim it is.
+```
+0x1074 tag=0x0182 len=648   container(4 children)
+  0x1078 tag=0x0001 len=1     value=02
+  0x1080 tag=0x8291 len=116   container(5 children)
+    0x1084 tag=0x8301 len=4     value=01000000
+    0x108c tag=0x8351 len=4     value=37000000
+    0x1094 tag=0x8352 len=4     value=01000000
+    0x109c tag=0x8380 len=8     value=01840400ffff0ca0
+    0x10a8 tag=0x8384 len=76    container(2 children)
+      0x10ac tag=0x8440 len=4     value=05000000
+      0x10b4 tag=0x8441 len=64    value=bb429dcd...      <- SHA-512, see below
+  0x10f8 tag=0x81ff len=136
+  0x1184 tag=0x8080 len=376   container(5 children)
+    0x1188 tag=0x8101 len=4     value=01000000
+    0x1190 tag=0x8102 len=4     value=01000000
+    0x1198 tag=0x8103 len=4     value=02000000
+    0x11a0 tag=0x8180 len=208   container
+    0x1274 tag=0x81ff len=136
+```
 
-This matters because it weakens one of our conclusions by exactly the right amount.
-"There is no hash table in the file" is too strong. The accurate statement is:
+### The 0x8441 field IS a digest — of the wrapper
 
-> No per-image digest of the inner images is stored anywhere we could find, under
-> any standard algorithm. A 652-byte metadata blob in the wrapper remains
-> unexplored and may describe the images in a format we did not decode.
+Measured, byte for byte:
+
+```
+region   : 0x0074 .. 0x1073   (4096 B = wrapper ph[0], type=LOAD, off=0x74, filesz=0x1000)
+sha512   : bb429dcd4d326c750057c33438820a282b7ffb61f910dda9c7675598ec7ab5787
+            d9d446d185b0b5def0a04d19fba1835966835688316027eb6e3d28804c1bedf
+TLV 0x8441: bb429dcd4d326c750057c33438820a282b7ffb61f910dda9c7675598ec7ab5787
+            d9d446d185b0b5def0a04d19fba1835966835688316027eb6e3d28804c1bedf
+identical: True
+```
+
+Reproduce: `scripts/hash_sweep.py`. The neighbouring `0x8440` value `5` is almost
+certainly the algorithm id (5 = SHA-512), though that mapping is an inference, not a
+measurement.
+
+So the earlier claim "no digest of any obvious byte range under any algorithm" was
+wrong for this field. Correct statement: the field is a SHA-512 **of the wrapper
+image**, i.e. of the TLV's own container. It protects the metadata block, not the
+five inner images.
+
+### The two 0x81FF blocks are not image digests
+
+Both are 136 bytes and share a layout of `[u32 len][64 B][u32 len][64 B]`:
+
+```
+0x10f8  len1=195  len2=427
+0x1274  len1=492  len2=307
+```
+
+Tested against SHA-512/SHA3-512/BLAKE2b/SHA-384 of: all five ELF images (raw,
+`0xFF`-stripped, `0x00`-stripped), each program header segment of each image, the
+whole file, the TLV region, the wrapper and concatenations of the TLV children —
+**84 candidates, 9 algorithms, zero matches**. Whatever those two blocks describe, it
+is not an inner-image digest.
+
+### What the blob is, then
+
+- A **constant** identifier block: bit-identical across ZUI 17.5.10.096 and
+  ZUI 18.5.10.037 (see §5), so it does not describe build-varying content.
+- It carries the only self-integrity check in the wrapper (SHA-512 over ph[0]),
+  plus platform constants: `0x8351 = 55`, `0x8352 = 1`, `0x8301 = 1`, and the pair
+  `0x8511 = 0x12345678` (sentinel) / `0x8510 = 0x0000FFFF`.
+
+This matters because it bounds one of our conclusions. "There is no hash table in the
+file" was too strong, and is now replaced by a measured statement:
+
+> The wrapper carries a SHA-512 of its own 4096-byte payload (tag `0x8441`), verified
+> byte-for-byte. No per-image digest of the five inner images exists anywhere in the
+> file under 9 algorithms and 84 candidate regions.
 
 What survives unchanged is the *empirical* result: substituting an image gives
 `0x21` at an offset before the substitution, so modifying the file cannot fix it,
@@ -167,26 +228,18 @@ Hunted, systematically:
 | MD5, SHA-1, SHA-224/384/512, SHA3-256, BLAKE2b, CRC32 of each image | same | **not present** |
 | Any table of image offsets | search for each inner offset as 32-bit and 64-bit LE | **not present** |
 | Certificate material in the wrapper interior | byte scan of `0x94`–`0x1074` | **4 064 bytes of zeros** |
+| Every program-header segment of every image, raw / `0xFF`-stripped / `0x00`-stripped | `scripts/hash_sweep.py`: 84 candidates × 9 algorithms against all hash-sized TLV values | **no match** |
 
-`scripts/find_hashes.py` reproduces all of this.
+`scripts/find_hashes.py` reproduces the first five rows; `scripts/hash_sweep.py`
+reproduces the last one.
+
+The one digest that *does* exist is in the metadata blob and covers the wrapper
+itself, not an image — see "The 0x8441 field IS a digest" above.
 
 ### The one region we did not decode
 
-The wrapper's ph[1] payload at `0x1074`–`0x1300` (652 bytes) is **not** empty, contrary
-to an earlier note. It is a tag/length blob with an outer header `tag=0x0182
-len=0x0288` covering all 652 bytes, containing a 64-byte high-entropy field at `+0x44`
-that is not a digest of any obvious byte range under any algorithm we tried.
-
-We never decoded its schema. So the precise claim is **not** "the file contains no
-metadata" but:
-
-> No per-image digest is stored under any standard algorithm we tested, and no table
-> referencing the inner image offsets exists. One 652-byte metadata blob remains
-> unexplained and might describe the images in a format we did not reverse.
-
-What does not depend on this: the substitution experiment fails with `0x21` at byte
-1 109 804, before the modified image at 1 117 008. Whatever that blob is, editing the
-container does not satisfy the check.
+None. The `0x1074`–`0x1300` blob is now decoded, including its schema, its container
+nesting and its one digest. See §4.
 
 ### Why per-image replacement cannot work
 
@@ -198,13 +251,43 @@ before the modified image. Building a valid modified melf would require:
 2. a hash table in the format it expects, in the location it expects,
 3. and a signature over that, from Qualcomm's key — not qtestsign's.
 
-Point 3 is unavailable, so the path ends regardless of 1 and 2. Point 1 is also
-unavailable, and the unexplored metadata blob in §5 is a reminder that "we did not
-find it" is not the same as "it is not there".
+Point 3 is unavailable, so the path ends regardless of 1 and 2. Point 1 is now partly
+answered — the inner images carry their own Qualcomm hash segments (see §6), and the
+wrapper carries only a SHA-512 over itself — but that does not open the path, because
+point 3 does not depend on it.
 
 ---
 
-## 6. `xbl_s.melf` is a prefix
+## 6. The metadata blob is identical across builds
+
+Three independently obtained copies of the same programmer:
+
+| package | size | file SHA-256 | TLV SHA-256 (`0x1074`–`0x1300`) |
+|---|---|---|---|
+| ZUI 18.5.10.037 (A17, RSA) | 1 569 028 | `3f6184f972eb413e…` | `d862fb4982821d99…` |
+| ZUI 17.5.10.096 | 1 569 028 | `ba72961ce341d4ed…` | `d862fb4982821d99…` |
+| `stock_18.5_ref` (device backup) | 1 569 028 | `3f6184f972eb413e…` | `d862fb4982821d99…` |
+
+Measured with `scripts/verify_tlv.py`. Between 18.5.10.037 and 17.5.10.096:
+
+```
+differing bytes total : 33 779
+first difference      : 0x314CC
+last difference       : 0x17E534
+differences inside TLV: 0
+```
+
+So the payload bytes differ substantially (the inner images are different builds)
+while the 652-byte metadata block is **bit-for-bit identical** — including the
+SHA-512 at `0x8441`, which therefore covers only the wrapper and never changes.
+
+Consequence: the blob cannot be a table of inner-image digests. If it were, it would
+have to differ between builds whose images differ. This is now a measurement, not an
+inference. What the blob holds is build-invariant platform data plus a self-check.
+
+   270|---
+
+## 7. `xbl_s.melf` is a prefix
 
 `xbl_s.melf` is 1 117 008 B — exactly the offset where image [3] begins.
 
@@ -215,7 +298,7 @@ cannot flash anything.
 
 ---
 
-## 7. Why Sahara asks for 1 554 996 of 1 569 028 bytes
+## 8. Why Sahara asks for 1 554 996 of 1 569 028 bytes
 
 The device requests images by offset and length, not the whole file. The final
 14 032 bytes are padding that no image needs. The set of requests sums to
@@ -230,7 +313,7 @@ briefly suspected a truncated final packet. It is not an anomaly.
 
 ---
 
-## 8. Rebuilding the container
+## 9. Rebuilding the container
 
 [`scripts/build_signed_melf.py`](../scripts/build_signed_melf.py) does the
 mechanical part correctly: it splits at `0x1300`, `0x110B50` and `0x15AB48`,
@@ -253,12 +336,13 @@ Two cautions if you extend it:
 
 ---
 
-## 9. Summary
+## 10. Summary
 
 | Question | Answer |
 |---|---|
 | Is the melf a program? | No, a container of five images. |
 | Is the Firehose inside it the same as the standalone ELF? | Yes, bit-identical. |
-| Is there a hash table in the file? | No per-image digest was found under any standard algorithm. One 652-byte metadata blob in the wrapper remains undecoded — see §5. |
+| Is there a hash table in the file? | The wrapper carries a SHA-512 of its own 4096-byte payload (tag `0x8441`, verified byte-for-byte). No per-image digest of the five inner images exists — 84 candidate regions × 9 algorithms, no match. See §5. |
+| Why does the metadata blob not change between builds? | It is build-invariant platform data plus a self-check; bit-identical across 17.5.10.096 and 18.5.10.037 while 33 779 payload bytes differ. See §6. |
 | Can one image be swapped? | No — whole-blob integrity, rejected before the swap point. |
 | Can the container be rebuilt? | Mechanically yes; usefully no, without Qualcomm's key. |
