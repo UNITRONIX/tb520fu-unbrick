@@ -39,9 +39,11 @@ Everything else is background. None of it will get you write access.
 
 ### "I want to port Linux to this tablet"
 
-1. [`08-linux-port-notes.md`](08-linux-port-notes.md) — Fedora, mainline kernel,
+1. [`12-bootloader-unlock.md`](12-bootloader-unlock.md) — you need an unlocked
+   bootloader first, and there is an HTTP endpoint that skips the email flow.
+2. [`08-linux-port-notes.md`](08-linux-port-notes.md) — Fedora, mainline kernel,
    firmware packaging, and what killed the effort.
-2. [`10-hardware-notes.md`](10-hardware-notes.md) — why the ROCKNIX ABL seemed
+3. [`10-hardware-notes.md`](10-hardware-notes.md) — why the ROCKNIX ABL seemed
    like a good idea and was not.
 
 ---
@@ -62,6 +64,7 @@ Everything else is background. None of it will get you write access.
 | `09-service-report.md` | English translation of the report given to the repair centre, plus the payload manifest. |
 | `10-hardware-notes.md` | ROCKNIX ABL substitution analysis, GPIO mismatch, qtestsign acceptance by XBL. |
 | `11-faq.md` | Twenty short questions and answers. |
+| `12-bootloader-unlock.md` | The HTTP unlock endpoint: URL format, file contents, per-serial signing, unlocking procedure and caveats. |
 
 ---
 

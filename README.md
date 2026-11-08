@@ -48,6 +48,57 @@ spend two weeks rediscovering the same dead ends.
 
 ---
 
+## Unlocking the bootloader without the email flow
+
+Lenovo's official unlock uses a web form and a confirmation email. The file it
+delivers is also served directly from a CDN path with the serial number in the URL,
+with no authentication:
+
+```
+http://cdn.zui.lenovomm.com/developer/tabletboot/<SERIAL>/sn.img
+```
+
+Replace `<SERIAL>` with your device serial — 8 characters, uppercase letters and
+digits, no spaces, no `S/N:` prefix. Get it from `adb shell getprop ro.serialno`,
+`fastboot getvar serialno`, the box label, or Settings → About tablet → Status.
+**Not** the model (`TB520FU`), not the IMEI.
+
+```bash
+# easiest: downloads, verifies the embedded serial matches, then saves
+python scripts/get_unlock_file.py --serial <SERIAL> --verify
+
+# or directly
+curl -O http://cdn.zui.lenovomm.com/developer/tabletboot/<SERIAL>/sn.img
+```
+
+PowerShell users: `curl` is an alias for `Invoke-WebRequest` there, so use
+`curl.exe` or `Invoke-WebRequest -Uri ... -OutFile sn.img`.
+
+Measured on 2026-11-08: `HTTP 200`, 5 386 B, ~0.09 s. Use plain HTTP — the CDN's
+HTTPS certificate does not match its hostname, so `https://` fails verification.
+
+Three things to know before you use it:
+
+- **The file is per device.** It carries your serial in plaintext at offset `0x800`
+  and an X.509 signature over it. A file for another serial will not unlock yours,
+  and editing the serial bytes breaks the signature.
+- **The server only answers for serials it knows.** Invented numbers return 404, so
+  a typo gives a clean failure rather than a wrong file.
+- **Unlocking voids the warranty and wipes all userdata.** On this tablet, first
+  boot after unlocking reports "Can't load Android system" — that is the expected
+  factory-reset state; choose factory data reset.
+
+> **This is the step that began everything in this repository.** Unlocking itself is
+> safe. What followed it — a Magisk root, a broken pivot initramfs, and finally a
+> bootloader built for different hardware flashed to both slots — is not. Read
+> [`docs/01-timeline.md`](docs/01-timeline.md) before going further, and keep one
+> ABL slot stock.
+
+Full procedure, certificate layout, and the measured endpoint behaviour:
+[`docs/12-bootloader-unlock.md`](docs/12-bootloader-unlock.md).
+
+---
+
 ## What actually happened
 
 1. The tablet was unlocked (official Lenovo `sn.img` unlock) and rooted with
@@ -190,6 +241,7 @@ docs/
   09-service-report.md        report submitted to the repair centre
   10-hardware-notes.md        the ROCKNIX ABL substitution analysis
   11-faq.md                   short answers to the obvious questions
+  12-bootloader-unlock.md     unlock file over HTTP: endpoint, contents, caveats
 session-notes/                raw translated session logs, unedited
 scripts/                      the tooling, in English, path-parameterised
 ```
@@ -223,6 +275,7 @@ All scripts are standalone, take explicit paths, and print English logs. See
 
 | Script | Purpose |
 |---|---|
+| `get_unlock_file.py` | fetch the bootloader unlock file for a serial over HTTP |
 | `melf_tool.py` | inspect, split, patch and verify a `melf` container |
 | `analyze_melf_map.py` | map data regions, compare embedded Firehose with the standalone ELF |
 | `find_hashes.py` | hunt for per-image hashes inside the container |

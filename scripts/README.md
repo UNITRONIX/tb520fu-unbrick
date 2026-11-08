@@ -42,6 +42,28 @@ which tools can work.
 
 ## The tools
 
+### `get_unlock_file.py` — bootloader unlock file over HTTP
+
+Fetches the per-device unlock token from Lenovo's CDN without the web form or the
+confirmation email.
+
+```bash
+python get_unlock_file.py --serial <SERIAL> --verify
+python get_unlock_file.py --inspect sn.img --serial <SERIAL>
+```
+
+`--verify` parses the image and refuses to save a file whose embedded serial does
+not match the one requested. `--inspect` describes an existing file: header fields,
+serial at `0x800`, and the offset of the X.509 chain.
+
+The endpoint, why HTTPS is broken there, and the per-serial signing are documented
+in [`../docs/12-bootloader-unlock.md`](../docs/12-bootloader-unlock.md).
+
+Note this script writes a file to **your disk** — that is its whole purpose. It
+does not touch the device.
+
+---
+
 ### `sahara_codes.py` — the code tables
 
 Every Sahara command and NAK code, with the vendor range above `0x28` clearly

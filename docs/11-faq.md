@@ -148,3 +148,34 @@ hypothesis is correct. Open an issue.
 The investigation itself, no — it was read-only. The *history* was dangerous: flashing
 a pivot initramfs to `init_boot`, then an ABL for different hardware to both ABL
 slots. Everything in this repository is the consequence.
+
+### 25. Do I have to use the web form and wait for the email to unlock?
+
+No. The unlock file is served from a CDN path with the serial in the URL and no
+authentication:
+
+```
+http://cdn.zui.lenovomm.com/developer/tabletboot/<SERIAL>/sn.img
+```
+
+```bash
+python scripts/get_unlock_file.py --serial <SERIAL> --verify
+```
+
+Use plain HTTP — the CDN's HTTPS certificate does not match its hostname. The file
+is signed per serial, so it will not work on a different device. Full details in
+[`12-bootloader-unlock.md`](12-bootloader-unlock.md).
+
+### 26. Is the unlock file generic? Can someone share theirs with me?
+
+No. It contains your serial in plaintext at offset `0x800` plus an X.509 signature
+over it. Another device's file, or an edited serial, will be refused. You have to
+download your own.
+
+### 27. I typed my serial and got a 404.
+
+The server only answers for serials it knows, so a 404 almost always means a typo
+rather than a server problem. Check: 8 characters, uppercase, no spaces, no `S/N:`
+prefix. Confirm the value with `adb shell getprop ro.serialno` or
+`fastboot getvar serialno` — and make sure you are using the serial, not the model
+number (`TB520FU`) or the IMEI.
