@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Firmware / ROM images — never commit these.
+#
+# Lenovo's RSA packages are ~13 GB and are proprietary. Nothing in this
+# repository redistributes them. See docs/11-faq.md for why.
+# ---------------------------------------------------------------------------
+*.zip
+*.7z
+*.rar
+*.img
+*.bin
+*.mbn
+*.melf
+*.elf
+*.hex
+*.x
+*.tar
+*.tar.gz
+*.xz
+*.ext4
+*.iso
+*.apk
+
+# Qualcomm programmers and payloads
+prog_firehose*
+xbl_s*
+DDRCS*
+rawprogram*.xml
+patch*.xml
+gpt_*.bin
+
+# ---------------------------------------------------------------------------
+# Logs and captures — almost always contain device serials, USB paths and
+# user directory names. Redact before publishing, then force-add the file.
+# ---------------------------------------------------------------------------
+*.log
+*.txt.log
+*_log.txt
+*_out.txt
+*_err.txt
+port_trace.txt
+banner_capture.log
+fastusb.log
+usb_capture.*
+
+# Extracted melf parts (regenerated with scripts/melf_tool.py split)
+melf_parts/
+out/
+build/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
