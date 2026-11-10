@@ -33,6 +33,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import atexit
 import struct
 import sys
 import time
@@ -286,8 +287,36 @@ def handshake_memory_debug(dev):
     table = mem_read(link, tbl_addr, tbl_len, tmo=4.0)
     if not table:
         log("  table read failed")
+        close_session(link)
         return link, None
+    _OPEN_LINKS.append(link)
     return link, parse_table(table)
+
+
+def close_session(link: Link) -> None:
+    """End a MEMORY_DEBUG session cleanly.
+
+    Leaving a session hanging is what produces the 'zombie' node: present in PnP,
+    mute to every subsequent open, cleared only by a power cycle. A SAHARA_RESET
+    (0x07 - never 0x13) returns the target to a fresh state.
+    """
+    try:
+        link.write(struct.pack("<II", CMD_RESET, 8))
+        link.read_packet(1500)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+#: Sessions opened via handshake_memory_debug, closed automatically at exit.
+_OPEN_LINKS: list[Link] = []
+
+
+def _close_all() -> None:
+    for lk in _OPEN_LINKS:
+        close_session(lk)
+
+
+atexit.register(_close_all)
 
 
 def main() -> int:

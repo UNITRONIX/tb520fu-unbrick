@@ -106,7 +106,7 @@ def decode(insn: int, pc: int) -> str:
         return "dsb"
     if (insn & 0xFFFFFFDF) == 0xD503209F:
         return "isb"
-    if (insn & 0xFFF00000) == 0xD5300000 or (insn & 0xFFD00000) == 0xD5100000:
+    if (insn & 0xFFF00000) == 0xD5300000 or (insn & 0xFFD00000) in (0xD5100000, 0xD5180000):
         op0 = (insn >> 19) & 3
         op1 = (insn >> 16) & 7
         crn = (insn >> 12) & 0xF
@@ -115,7 +115,9 @@ def decode(insn: int, pc: int) -> str:
         rt = _rd(insn)
         key = (crn << 8) | (crm << 4) | op2
         name = SYSREG.get(key)
-        is_read = (insn & 0xFFD00000) == 0xD5100000
+        # MSR (register) has L=0 at bit 21; MRS has L=1.
+        # 0xD518.... -> L=0 -> MSR (write). 0xD538.... -> L=1 -> MRS (read).
+        is_read = bool(insn & (1 << 21))
         if name:
             if is_read:
                 return f"mrs {X[rt]}, {name}"

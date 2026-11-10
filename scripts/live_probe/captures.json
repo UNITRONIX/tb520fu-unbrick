@@ -1,0 +1,36 @@
+{
+  "a": {
+    "when": "2026-11-10T22:26:50",
+    "regions": 53,
+    "diag": {
+      "RST_STAT": 3,
+      "PMIC_PON": 37749248,
+      "PMON_HIS": null,
+      "FSM_STS": 135425,
+      "FSM_CTRL": 17373,
+      "DBG_EN": 2164
+    },
+    "hashes": {
+      "SHRM_HEAD": "7e6a42f0926da7ac",
+      "PMIC_BLOCK": "657d8880bc9d41e1",
+      "OCIMEM_HEAD": "453e3df03481eb3d"
+    }
+  },
+  "b": {
+    "when": "2026-11-10T22:27:35",
+    "regions": 53,
+    "diag": {
+      "RST_STAT": 3,
+      "PMIC_PON": 37749248,
+      "PMON_HIS": null,
+      "FSM_STS": 135425,
+      "FSM_CTRL": 17373,
+      "DBG_EN": 2164
+    },
+    "hashes": {
+      "SHRM_HEAD": "7e6a42f0926da7ac",
+      "PMIC_BLOCK": "106e188890176e87",
+      "OCIMEM_HEAD": "10abd79132a72386"
+    }
+  }
+}
