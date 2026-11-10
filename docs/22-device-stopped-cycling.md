@@ -39,7 +39,7 @@ two seconds apart, all failing, with no reset sent between them.
 
 ## 3. What it is not
 
-`access_denied_diagnosis.py` rules out every host-side explanation:
+`access_denied_diagnosis.py` rules out every host-side driver explanation:
 
 ```
 Status       OK
@@ -51,14 +51,30 @@ serial ports COM1 only       <- no Qualcomm COM port appeared; not "world B"
 EDL processes none           <- no orphan holding the handle
 ```
 
-So:
+So: not a driver-world mix-up (`07-dead-ends.md` §A6), not a PnP problem. Windows
+reports the node as working.
 
-- not a driver-world mix-up (`07-dead-ends.md` §A6);
-- not an orphaned process holding the interface (§F1);
-- not a PnP problem — Windows reports the node as working.
+### But one host-side cause WAS real, and it skewed the first measurement
 
-The refusal is coming from the device, not the host: it accepts the enumeration and
-then does not participate.
+The first `timing_window.py` run reported 490/491 samples as `present-noopen(err13)`.
+That was **not** the device — it was the measuring tool. `release_interface()` alone
+does not give the claim back on Windows; `usb.util.dispose_resources(dev)` is also
+required. Without it, every snapshot after the first failed with EACCES and was counted
+as "not openable".
+
+After adding the dispose call, the same measurement reads:
+
+```
+absent              0 samples   (0.0%)
+present-noopen      0 samples   (0.0%)
+open-noREAD        79 samples  (100.0%)
+READ                0 samples   (0.0%)
+```
+
+That is the honest picture, and it is different in an important way: the node **opens
+fine** and simply **never delivers a packet**. The earlier `err13` storm was an
+artefact of the tool, and had it been reported as a device finding it would have been
+wrong.
 
 ## 4. Why this matters for the tooling
 
@@ -102,6 +118,9 @@ remedy, and it is cheap.
    the one measurement with real informational value, and it needs a healthy device.
 3. **One session per capture, always closed.** With the leak fixed, that should now
    hold — but verify with `session_hygiene.py` on the first capture, not the last.
+4. **Always dispose the libusb handle.** This is the lesson of §3: a probe that
+   "fails" immediately after a successful one is far more likely to be the tool's own
+   claim than a device fault.
 
 The fingerprint experiment remains the outstanding item:
 
@@ -111,3 +130,34 @@ baseline captures  ->  one Sahara upload  ->  post-upload captures  ->  diff
 
 because it is the only measurement that would show what the programmer actually did in
 the ~98 ms before it stops.
+
+---
+
+## 7. Addendum: the steady state after the third power cycle
+
+After a further power cycle the device returned and answered exactly **one** HELLO,
+then stopped delivering packets while remaining openable:
+
+```
+probe 1  HELLO(cmd=0x1)
+probe 2  cfg-fail(13)     <- this was the leaked claim, now fixed
+probe 3  cfg-fail(13)
+```
+
+and after the dispose fix:
+
+```
+probe 1..5  timeout       (openable, no packet)
+```
+
+`timing_window.py` over 45 s: **100% `open-noREAD`, 0% absent.**
+
+Reading that precisely: the Sahara HELLO is a **single pending packet**. Whoever reads
+it consumes it. A device that is not re-running its boot cannot produce a second one.
+So the node being openable but silent is the expected consequence of the device having
+stopped booting — not an independent fault.
+
+That makes the situation simple and worth stating plainly: **until the tablet cycles
+again, no Sahara or memory work is possible, and no amount of host-side tooling changes
+that.** A power cycle is the only lever, and it has worked three times tonight.
+

@@ -80,10 +80,19 @@ def one_probe(label: str) -> str:
     except usb.core.USBError as err:
         return f"usb-err({err.errno})"
     finally:
-        # Release WITHOUT sending anything. This is the gentlest possible close, so
-        # that if the node wedges anyway the read is implicated rather than a reset.
+        # Release WITHOUT sending anything, then dispose the whole device handle.
+        #
+        # release_interface alone is NOT enough on Windows: libusb keeps a claim on
+        # the device, and the next open of the same node fails with EACCES (errno 13)
+        # even though Windows reports the device healthy. That looked exactly like a
+        # wedged device for several runs - the first probe answered HELLO and every
+        # later one failed, purely because this handle had not been disposed.
         try:
             usb.util.release_interface(dev, 0)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            usb.util.dispose_resources(dev)
         except Exception:  # noqa: BLE001
             pass
 

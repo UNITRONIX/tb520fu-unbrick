@@ -80,6 +80,14 @@ def snapshot():
             usb.util.release_interface(dev, 0)
         except Exception:  # noqa: BLE001
             pass
+        # Dispose the handle, or the NEXT snapshot fails with EACCES (errno 13) and
+        # is counted as "present but not openable". Without this the measurement is
+        # dominated by the tool's own leaked claims rather than by the device, which
+        # is how an earlier run reported 490/491 "not openable" for a healthy node.
+        try:
+            usb.util.dispose_resources(dev)
+        except Exception:  # noqa: BLE001
+            pass
 
     return True, True, read_ok, 0
 
