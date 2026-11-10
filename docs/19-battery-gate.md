@@ -160,37 +160,113 @@ may still be true, but this finding moves the plausible failure point **one laye
 earlier**, into XBL, where the battery gate lives and where a refusal produces
 precisely the signal we measure.
 
-### The live-VBAT search, and why it failed
+### The loop is bounded, and the timing rules DBC out
 
-`scripts/find_live_vbat.py` scanned the two dump regions for 16-bit values in a
-plausible single-cell range (3000–4600 mV):
+`scripts/dbc_trace.py` isolated the third (and last) backward branch in the
+recovery function. Its structure:
 
 ```
-sbl_pmic_dump   495 values in range, 255 clusters
-SHRM_MEM       2823 values in range, 1486 clusters
+0x14837f48  ldrh w8, [x21, #0xbc]      threshold from the config struct
+0x14837f50  ldrh w9, [x29, #-0xc]      measured value
+0x14837f58  sub  w22, w8, w9           difference
+0x14837f4c  movz w21, #0x86a0
+0x14837f54  movk w21, #0x1, lsl #16    w21 = 0x186a0 = 100 000 us = 0.1 s
+0x14837f5c  bl   0x148386f8            refresh the reading
+0x14837f60  tbnz x22, #31, 0x14837fa8  negative -> EXIT (voltage sufficient)
+0x14837f98  mov  w0, w21
+0x14837f9c  bl   0x14832ac8            delay(0.1 s)
+0x14837fa0  sub  w22, w22, #0x64       reduce the gap by 100 mV
+0x14837fa4  b    0x14837f5c            loop
 ```
 
-**That is noise, not a measurement.** A 512 KiB region contains thousands of u16
-values, so several hundred will inevitably fall in any 1600-wide window. The
-most-common values (4112, 4352, 3072 in the PMIC dump; 4335, 4417, 4085 in SHRM)
-are scattered across the file rather than confined to a register block, which is
-what an ADC output would look like.
+**The loop terminates.** It decrements the difference by 100 mV per iteration and
+exits when the sign goes negative, so it is bounded by construction:
 
-There was one superficially promising cluster in SHRM_MEM at `0x017b48`
-(`4086, 4093, 4070, 4195, 4086, 4086, 4092, 4069...`) — tight, consistent values.
-But consistency is not evidence of being a voltage; it is equally consistent with
-any repeated data field, and the region is firmware data, not a PMIC capture.
+| gap | iterations | duration |
+|---|---|---|
+| 400 mV | 4 | 0.4 s |
+| 1000 mV | 10 | 1.0 s |
+| worst case (u16 max) | 655 | **65.5 s** |
 
-**Conclusion: the dumps do not yield a live VBAT.** The measurement this hypothesis
-needs cannot be obtained from what is on disk. It would require either a working
-PMIC ADC read over EDL, or a physical measurement at the battery connector.
+**Measured against the observed failure, this rules the battery gate out.**
 
-That is not a reason to discard the hypothesis — it is a reason to be explicit that
-it remains untested rather than refuted.
+The device leaves the bus **8.016 s** after `DONE`. No branch of this loop produces
+that figure: the common cases finish in under a second and then proceed, and the
+pathological case runs for over a minute. Eight seconds sits in the gap between
+them, where this loop cannot place it.
+
+So the DBC hypothesis — which `05-firehose-and-the-silence.md` had dismissed for a
+different and insufficient reason — is now dismissed for a measured one.
+
+### What that leaves
+
+The number **8.016 s** is the strongest remaining clue, because it must correspond
+to something periodic. The watchdog window measured elsewhere on this platform is
+**7.918 s ±3 ms**, leaving roughly **98 ms of work** between the last acknowledgement
+and the stall.
+
+That shape — a short burst of activity, then silence — is not a gate that refuses.
+It is code that starts something and stops making progress. The remaining work is
+therefore to find what the programmer does in those ~98 ms.
 
 ---
 
-## 7. Method note
+## 7. No 8-second wait exists anywhere
+
+`scripts/find_8s_loops.py` scanned every `bl` to the known microsecond-delay routines
+in all three code images and computed the argument. In the 0.05–30 s range there is
+**exactly one** hit:
+
+```
+image [2]  0x14837e98   delay 50 000 us = 0.050 s
+image [3]  none
+image [4]  none
+```
+
+So there is no designed sleep anywhere near 8 s. That settles the shape of the
+failure: **8.016 s is not a wait, it is a window.** The programmer ran, did something
+briefly, and stopped advancing — and the watchdog then collected it after its
+7.918 s of patience expired.
+
+The ~98 ms difference between 8.016 s and 7.918 s is the only evidence about how much
+work actually happened before the stall. That is a very short burst, which is
+consistent with a failure early in a call rather than a long computation.
+
+---
+
+## 8. The watchdog surface
+
+`scripts/watchdog_map.py` enumerates every watchdog-related string and the code that
+references it:
+
+```
+0x148ad6dd  "Pet Charger wdog failed"         ref 0x14837bd8
+0x148ac116  "boot_wdog_disable_check"         no direct refs (symbol table)
+0x148ac6e9  "xbl_sc_wdog"                     no direct refs
+0x148ab132  "RST:APPS_WDOG_BITE"              ref 0x14827848
+0x148ab145  "RST:AOP_WDOG_BITE"               ref 0x14827854
+0x148ad992  "WDog S2"                         ref 0x14838f34
+0x148ab91e  "WatchDogTimerLib.c"              ref 0x1482c3cc
+```
+
+Two things worth noting:
+
+- **`"Pet Charger wdog failed"`** — the firmware separately services a *charger*
+  watchdog. That is a different beast from the SoC watchdog and it is a reminder that
+  "the watchdog fired" is not automatically about the CPU.
+- **`"WDog S2"`** appears in a reset-reason name table alongside `Resin S2`,
+  `PSHOLD`, `SW Reset`, `RTC`. So `RST_STAT = 0x3` reading as "watchdog" is consistent
+  with a named, enumerable reset cause rather than an inference.
+
+There is also a `boot_wdog_disable_check` symbol, i.e. code that can *check* whether
+disabling the watchdog is permitted. It is compiled in. Its reference site was not
+found by string search because it is a symbol name, not a used literal — following it
+would require symbol resolution rather than string cross-reference, which is a
+different technique and beyond what this pass established.
+
+---
+
+## 9. Method note
 
 Two earlier arithmetic errors in this project came from reading a constant next to
 the wrong instruction. This analysis deliberately resolved `0x186a0` before using
