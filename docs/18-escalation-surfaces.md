@@ -45,26 +45,75 @@ is not a devprg-only path.
 
 ### The trigger parameters, read from the code
 
-`fedl_timing.py` and the disassembly of the check routine give the numbers:
+`fedl_timing.py` and the disassembly of the check routine give the numbers. The
+loop that watches the line is small and its bounds are explicit:
 
 ```
 0x14882e78  entry of the check routine
-0x14882ea8  movz w0, #0x14          settle delay, 20 ms
-0x14882eac  bl   0x148829bc        udelay(20)
-0x14882eb0  bl   0x14882e10        init_dp_gnd (retries 3x with '0x52/0xb1')
-0x14882eb8  b.eq 0x14882ef4        init failed -> give up
-0x14882ec4  movz w21, #0x3e8       1000 poll iterations
-0x14882ebc  movz w23, #0x3028
-0x14882ec8  movk w23, #0x88e, lsl #16   -> 0x088E3028   PHY register
+0x14882ea8  movz w0, #0x14            settle delay before the check
+0x14882eac  bl   0x148829bc          delay(w0)
+0x14882eb0  bl   0x14882e10          init_dp_gnd, retried up to 3x
+0x14882eb8  b.eq 0x14882ef4          init failed -> give up
+0x14882ec4  movz w21, #0x3e8         w21 = 1000 (delay argument)
+0x14882ec8  movk w23, #0x88e, lsl #16 -> w23 = 0x088E3028  PHY register
+
+0x14882ed4  cmp w24, #0x31           w24 counts iterations
+0x14882ed8  b.hi 0x14882efc          exit after 50 iterations
+0x14882edc  ldrh w8, [x23]           read the PHY register
+0x14882ee0  tbz x8, #0, 0x14882f5c   bit 0 clear -> leave the loop
+0x14882ee4  mov w0, w21              w0 = 1000
+0x14882ee8  bl 0x148829bc            delay(1000)
+0x14882eec  add w24, w24, #1
+0x14882ef0  b 0x14882ed4
 ```
 
-So the poll loop is **1000 iterations**, each with a delay, against a USB PHY
-register at `0x088E3028`. The practical window is on the order of **tens of
-seconds**, not milliseconds — which is the opposite of what the earlier note
-assumed when it described the cable as unreliable.
+**The loop is bounded at 50 iterations, not 1000.** The `1000` in `w21` is the
+argument passed to the delay routine, not the iteration count. The iteration count
+is `w24`, compared against `0x31` (49) and exiting when it exceeds it.
 
-That single fact changes the experiment: a failure before was very likely a
-**setup** failure, not a timing failure.
+The delay routine resolves to microseconds — traced to the end of the chain:
+
+```
+0x148829bc  b 0x14882cb0 -> b 0x14847cd4
+0x14847cec  ldrh w10, [0x148fea0]     counter frequency
+0x14847cf0  mul  x10, x10, w0         x10 = freq * argument
+0x14847cf4  movz w11, #0x4240
+0x14847cf8  movk w11, #0xf, lsl #16   w11 = 0xF4240 = 1 000 000
+0x14847cfc  (divide)                  ticks = freq * arg / 1e6
+0x14847d00  spin loop on the counter until that many ticks pass
+```
+
+Dividing by 1 000 000 is the signature of microseconds. So `delay(1000)` is
+**1 ms**, and the whole poll window is:
+
+```
+50 iterations x 1 ms = ~50 ms
+```
+
+**Correction to an earlier draft of this document.** It stated "20 ms x 1000 = 20 s"
+and concluded the window was tens of seconds. That was wrong: `w21 = 1000` had been
+read as an iteration count when it is the delay argument, and `0x14` was read as the
+per-iteration delay when it is a one-off settle before the loop. The real window is
+about **50 milliseconds**.
+
+### What that means for a cable attempt
+
+The poll runs once, early in USB initialisation, for roughly 50 ms. So the short
+cannot be *timed into* that window — it has to be **already present** when the code
+runs. Practically:
+
+- apply the short **before** power is applied,
+- **hold** it through the whole boot attempt,
+- release it once the device enumerates as `9008`.
+
+This is a "hold and wait" strategy, not a race. The precision problem disappears
+because the short is simply there when firmware looks.
+
+It also explains the earlier result honestly: a 50 ms window is narrow enough that an
+unreliable rig, a connector that only sometimes makes contact, or a release that
+happened too early would all produce "worked once, then never again" — which is
+exactly what `07-dead-ends.md` §D1 recorded. The path is real; the previous attempts
+were almost certainly defeating themselves mechanically.
 
 **Why this matters more than anything else in this document.** `FEDL`
 (*forced emergency download*) is a boot-ROM-level path. It does not need the
