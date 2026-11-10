@@ -41,7 +41,12 @@ import usb.util
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crash_region_probe import handshake_memory_debug, mem_read, open_device  # noqa: E402
+from crash_region_probe import (  # noqa: E402
+    close_session,
+    handshake_memory_debug,
+    mem_read,
+    open_device,
+)
 
 OUT = Path(__file__).resolve().parent / "changing_bytes"
 T0 = time.time()
@@ -87,6 +92,10 @@ def capture(budget: float = 100.0) -> dict | None:
         blob = mem_read(link, addr, ln, tmo=8.0)
         if blob:
             out[name] = blob
+
+    # Close as soon as the reads are done, rather than relying on process exit.
+    # An outstanding read that is abandoned is the state that leaves the node mute.
+    close_session(link)
     return out or None
 
 

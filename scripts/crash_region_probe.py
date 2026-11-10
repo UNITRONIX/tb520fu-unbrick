@@ -289,6 +289,10 @@ def handshake_memory_debug(dev):
         log("  table read failed")
         close_session(link)
         return link, None
+    # Register BEFORE returning so the atexit hook closes this session even if the
+    # caller raises or exits without closing. Registering only on a later success
+    # path is what left nodes wedged: an abandoned session stays mute until a power
+    # cycle, and the hook never saw it.
     _OPEN_LINKS.append(link)
     return link, parse_table(table)
 

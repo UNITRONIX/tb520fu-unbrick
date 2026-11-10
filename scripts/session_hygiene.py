@@ -63,10 +63,30 @@ def qcom_pid():
     return None
 
 
+def wait_fresh_900e(budget: float = 90.0) -> bool:
+    """Wait until a 900E appears that actually answers a HELLO.
+
+    A boot-looping unit is absent for ~15 s at a time, and a node caught mid-cycle
+    reads as muted. 'Mute' and 'mid-cycle' look identical from a single attempt, so
+    this retries across enumerations before concluding anything.
+    """
+    end = time.time() + budget
+    while time.time() < end:
+        if qcom_pid() != 0x900E:
+            time.sleep(0.05)
+            continue
+        if phase_hello():
+            return True
+        # let it cycle before trying again
+        end2 = time.time() + 25
+        while time.time() < end2 and qcom_pid() is not None:
+            time.sleep(0.05)
+    return False
+
+
 def phase_hello() -> bool:
     dev = usb.core.find(idVendor=0x05C6, idProduct=0x900E)
     if dev is None:
-        log("  no 900E on the bus")
         return False
     try:
         dev.set_configuration(1)
@@ -78,15 +98,13 @@ def phase_hello() -> bool:
         pass
     try:
         link = Link(dev)
-        pkt = link.read_packet(2500)
-    except Exception as err:  # noqa: BLE001
-        log(f"  open/read failed: {type(err).__name__}")
+        pkt = link.read_packet(2000)
+    except Exception:  # noqa: BLE001
         return False
     if pkt is None:
         return False
     cmd = struct.unpack_from("<I", pkt, 0)[0]
     log(f"  HELLO present (cmd={cmd:#x})")
-    # leave it clean
     close_session(link)
     return True
 
@@ -103,14 +121,15 @@ def main() -> int:
         return 1
 
     log("")
-    log("phase 1: does the node answer HELLO?")
-    if not phase_hello():
-        log("  NO - the node is mute.")
+    log("phase 1: does the node answer HELLO? (retrying across boot cycles)")
+    if not wait_fresh_900e(90):
+        log("  NO - no responsive session in 90 s.")
         log("")
-        log("  This is the zombie state. It cannot be cleared from software:")
-        log("    - libusb reset does not re-enumerate it")
+        log("  Either the node is in the zombie state (enumerable, mute) or the")
+        log("  device is not cycling. A power cycle (hold Power ~15 s) clears the")
+        log("  zombie state; software cannot:")
+        log("    - libusb reset does not re-enumerate the node")
         log("    - PnP disable/enable needs administrator rights and usually fails")
-        log("  A power cycle (hold Power ~15 s) is the only remedy.")
         return 1
     log("  yes")
 
