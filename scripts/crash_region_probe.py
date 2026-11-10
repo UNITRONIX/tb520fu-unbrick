@@ -198,27 +198,59 @@ def classify(blob: bytes) -> str:
     return f"{tag} (nonzero {nz / len(blob):.0%}, code-like {ratio:.0%}) head={head.hex(' ')}"
 
 
+def _read_hello(link: Link, attempts: int = 3, tmo: int = 3000):
+    """Read packets until HELLO arrives, tolerating RESET_RSP and END_TRANSFER.
+
+    After SAHARA_RESET the device replies RESET_RSP (0x08) and only then sends a
+    fresh HELLO. Reading a single packet therefore stops on the RESET_RSP and
+    reports 'expected HELLO, got cmd=0x8' - a state that looks broken but is
+    simply mid-handshake. This drains up to `attempts` packets looking for HELLO.
+    """
+    for _ in range(attempts):
+        try:
+            pkt = link.read_packet(tmo)
+        except Exception as err:  # noqa: BLE001
+            # A pipe error here means the device reset out from under us, which
+            # happens constantly on a boot-looping unit. Treat it as "no packet"
+            # rather than letting it kill the caller.
+            log(f"  read interrupted ({type(err).__name__}) - device probably reset")
+            return None
+        if pkt is None:
+            return None
+        cmd = struct.unpack_from("<I", pkt, 0)[0]
+        if cmd == CMD_HELLO_REQ:
+            return pkt
+        if cmd == CMD_RESET_RSP:
+            continue          # expected after SAHARA_RESET; keep reading
+        if cmd == CMD_END_TRANSFER:
+            # a stale transfer: close it, then keep reading for HELLO
+            try:
+                link.write(struct.pack("<II", CMD_DONE_REQ, 8))
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+        # anything else is not part of a clean open
+        return pkt
+    return None
+
+
 def handshake_memory_debug(dev):
     """Return (link, tables) or None. Never switches mode, never uploads."""
     link = Link(dev)
-    pkt = link.read_packet(3000)
+    pkt = _read_hello(link, attempts=2, tmo=2500)
     if pkt is None:
         log("  nothing pending - trying SAHARA_RESET (0x07), NOT 0x13")
-        link.write(struct.pack("<II", CMD_RESET, 8))
-        pkt = link.read_packet(3000)
+        try:
+            link.write(struct.pack("<II", CMD_RESET, 8))
+        except Exception as err:  # noqa: BLE001
+            log(f"  reset not accepted ({type(err).__name__}) - device mid-cycle")
+            return None, None
+        pkt = _read_hello(link, attempts=4, tmo=3000)
     if pkt is None:
         log("  device does not answer Sahara at all")
         return None, None
 
     cmd = struct.unpack_from("<I", pkt, 0)[0]
-    if cmd == CMD_END_TRANSFER:
-        log("  END_TRANSFER pending - reset first")
-        link.write(struct.pack("<II", CMD_RESET, 8))
-        pkt = link.read_packet(3000)
-        if pkt is None:
-            return None, None
-        cmd = struct.unpack_from("<I", pkt, 0)[0]
-
     if cmd != CMD_HELLO_REQ:
         log(f"  expected HELLO, got cmd={cmd:#x}")
         return None, None
