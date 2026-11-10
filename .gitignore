@@ -29,6 +29,12 @@ rawprogram*.xml
 patch*.xml
 gpt_*.bin
 
+# Payloads extracted from Lenovo firmware by scripts/extract_xbl_config.py.
+# These are Lenovo/Qualcomm proprietary blobs (DCB, pre-DDR DTB, cpr.bin) and
+# are NOT redistributed here. The extraction script reproduces them from a ROM
+# package you obtain yourself, so nothing is lost by ignoring them.
+scripts/xbl_config_payloads/
+
 # ---------------------------------------------------------------------------
 # Logs and captures — almost always contain device serials, USB paths and
 # user directory names. Redact before publishing, then force-add the file.

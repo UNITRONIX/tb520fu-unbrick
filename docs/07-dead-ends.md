@@ -214,6 +214,52 @@ battery screen, so it is running, but its key GPIOs are mapped for AYANEO hardwa
 
 **Why:** hardware mismatch, not a timing or technique issue.
 
+> **Correction, 2026-11-08 late evening (measured).** The "wrong GPIO pins"
+> explanation is **wrong for Volume Down** and the conclusion drawn from it was
+> too broad. Checked in this board's own device tree:
+>
+> ```
+> &pon_pwrkey { status = "okay"; };
+> &pon_resin { linux,code = <KEY_VOLUMEDOWN>; status = "okay"; };
+> ```
+>
+> Volume Down is `pon_resin` — a **PMIC PON block input**, identical on every
+> Qualcomm platform. It is not a TLMM GPIO and cannot be board-mismatched.
+> (Volume *Up* is `<&pm8550_gpios 6>`, so that one genuinely can differ.)
+>
+> A watcher that enumerated **every** USB device (no VID filter, so no
+> `05C6`-only blind spot) held the key through the full absence window:
+>
+> ```
+> [ 90.19] - GONE  05c6:900e          <- device off the bus
+> [105.98] + APPEAR 05c6:900e         <- back as crashdump
+>          (11 devices throughout, no new VID:PID at all)
+> ```
+>
+> 16 s with Volume Down held, zero new USB nodes. So the key really does not
+> reach the menu — but **not** because the pin is wrong.
+>
+> **Revised reason:** the ABL never reaches its menu decision point. It renders
+> the offline-charging screen (the battery the owner sees) and/or dies before
+> mode selection. A key read is irrelevant if the code that reads it never runs.
+>
+> This also closes the USB-boot idea: booting Linux from a USB stick requires the
+> same menu to select `BootSourceMode`, so it inherits the identical blocker.
+
+### D2a. PMIC PON latch as a key-press probe — inconclusive by design
+
+`PMIC_PON` (`0x81b75048`) was read in 900E to test whether the PMIC sees the key:
+
+```
+PMIC_PON = 0x02400200   low nibble = 0 -> PON_KPDPWR (power key only)
+RST_STAT = 0x00000003   bits b0+b1 (core reset + watchdog)
+```
+
+**Why it proves nothing:** the PON latch records why the device *powered on*, not
+why it *reset*. This device resets from the **watchdog**, so the latch is not
+expected to change with a key held. The register is the wrong instrument for this
+question — recorded here so it is not retried.
+
 ### D3. `DEVICE_DESCRIPTOR_FAILURE` as a hidden mode
 
 Hypothesis: the `VID_0000&PID_0002` node with no driver is an undocumented EDL
@@ -303,6 +349,19 @@ forcing the update on the live node, occasionally with a device removal and resc
 | Replacing the SoC or eMMC programming | Hardware-level; assumes the fault is storage, which the evidence contradicts. |
 | Waiting for a leaked Lenovo SM8650 programmer | Possible, and the only zero-cost option, but open-ended. |
 | Buying a second identical tablet to dump partitions | Would not help: the partition layout and payloads are already known and verified. Only the signing chain is unknown, and that is not on the storage. |
+
+> **Correction (2026-11-10).** An earlier version of this section claimed that DDR
+> could not be read in crashdump mode, "confirmed with small blocks". That was
+> wrong, and it was wrong on the strength of a single probe at `0x9fa00000`.
+>
+> In `mode=2` the device returns a **named table of 53 regions** it will expose.
+> Reading that table — rather than guessing an address — works reliably, and it
+> gives access to `SHRM_MEM` (the DDR firmware's own training log and failure
+> table), `sbl_pmic_dump`, the crash-context structures and the first few MiB of
+> DDR. See [`15-crashdump-memory-access.md`](15-crashdump-memory-access.md).
+>
+> The lesson is the general one: "the device did not answer" and "I asked for the
+> wrong address" look identical from the host, and only one of them is a finding.
 
 ---
 

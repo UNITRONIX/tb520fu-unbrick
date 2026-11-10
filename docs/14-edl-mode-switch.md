@@ -198,6 +198,38 @@ than the switch command:
 **None of these replace V1.** The exec path is useful for reading device identity
 (and it is where HWID came from), not for reaching `9008`. Use `SWITCH_MODE`.
 
+> **Correction, 2026-11-10 — this table does not reproduce on the current
+> firmware.** Every one of these was retested against the real PBL (`9008`,
+> `HELLO ver=3 mode=0`, command mode confirmed by `CMD_READY`), one command per
+> freshly cycled session, with framing identical to `edlclient`'s `cmd_exec`
+> (`<III`, len `0xC`):
+>
+> ```
+> 0x02 MSM_HW_ID_READ         -> 0x1F EXEC_CMD_UNSUPPORTED
+> 0x05 SWITCH_TO_STREAM_DLOAD -> 0x1F EXEC_CMD_UNSUPPORTED
+> 0x08 GET_COMMAND_ID_LIST    -> 0x1F EXEC_CMD_UNSUPPORTED
+> 0x09 GET_TRAINING_DATA      -> 0x1F EXEC_CMD_UNSUPPORTED
+> ```
+>
+> `0x1F` means EXECUTE was parsed and the client command is simply not
+> implemented — it is not a framing error. Note `0x02` is the control: it is the
+> row this table credits with a concrete value (`0x2280e1`), and it now returns
+> `0x1F`. So either that HWID came from a different firmware revision, or the
+> value was carried over from an earlier tool run rather than produced in the
+> session that recorded it.
+>
+> **Consequence:** "no useful effect" was too weak a statement for
+> `SWITCH_TO_*_DLOAD`. They are **not implemented**, which closes the idea of a
+> download path that avoids the Firehose programmer. Firehose is the only one
+> this PBL offers.
+>
+> Also measured: a rejected EXECUTE leaves the device in the zombie `9008`
+> state — enumerable but mute, cleared only by a manual power cycle. Sending
+> several probes in one session yields one real result and several false
+> silences.
+>
+> See [`15-crashdump-memory-access.md`](15-crashdump-memory-access.md) §6.
+
 ### V5 — physical: EDL cable
 
 A cable that shorts the right pins can force a genuine PBL-level EDL, bypassing

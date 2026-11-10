@@ -189,6 +189,23 @@ trips — for instance on a failed charger detection, or because the fuel gauge
 reports a state the programmer does not accept. That cannot be distinguished from
 the host.
 
+> **Update, 2026-11-10 — this hypothesis loses support.** A power-down and a
+> watchdog reset are distinguishable in the crash dump, and it is a watchdog:
+>
+> ```
+> RST_STAT = 0x00000003      bit 1 = WATCHDOG, four separate observations, identical
+> DONE -> device leaves USB  +8.016 s
+> platform watchdog window   7.918 s +/- 3 ms   (measured elsewhere on this SoC)
+> ```
+>
+> The 8.016 s is that same clock. A DBC shutdown would leave the device off the
+> bus **without** a watchdog reset. So the programmer is not being shut down by
+> its battery guard — it starts, hangs, and is collected by the watchdog.
+>
+> That does not identify the hang. It does mean 6.2 should not be carried forward
+> as a live alternative to 6.1. Details:
+> [`15-crashdump-memory-access.md`](15-crashdump-memory-access.md) §5.
+
 ### 6.3 Which is it?
 
 Unknown, and it does not change the remedy. Both end at the same place: a service
@@ -229,6 +246,26 @@ Things that were unavailable and would each have resolved the ambiguity:
 
 The pattern is that all three require the device to reach a state that the broken
 bootloader prevents. This is the practical definition of the dead end.
+
+> **Correction, 2026-11-10 — the first item on that list is wrong for DDR.**
+> The DDR training result does not require UART. `SHRM_MEM.BIN`, which the
+> crash dump exposes, contains the DDR firmware's own log structures:
+>
+> ```
+> 'DDR_FW version : 102.6.0'
+> 'TRN_PRINT'  'TRN_ISSUE'
+> '%s: REASON=%s,FREQ=%s,CHANNEL=%s,CHIPSELECT=%s,BYTE=%s,BIT=%s,LIMIT=0x%X,VALUE=%d'
+> all 11 training stage names, plus a 20-entry failure-reason table
+> ```
+>
+> Measured on this unit: the buffers are populated (95% / 49% nonzero) and contain
+> **zero instantiated failure records** — only the format string. That weighs
+> against hypothesis 6.1 rather than confirming it, though it does not close it
+> (a hang can occur before any record is written).
+>
+> So the DDR half of 6.1 is now answerable from the host, and should be answered
+> before anyone pays for a board swap or a test point.
+> See [`15-crashdump-memory-access.md`](15-crashdump-memory-access.md) §4.
 
 ---
 

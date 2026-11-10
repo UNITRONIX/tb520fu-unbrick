@@ -37,13 +37,44 @@ the submitted document.
 | # | Test | Result |
 |---|---|---|
 | 1 | Normal boot, attempt to enter fastboot and recovery | No effect. Lenovo logo, then Qualcomm diagnostic mode. Sequence repeats. |
-| 2 | Bootloader menu via Vol+/Vol− at power-on | Keys not read by the bootloader. Menu unreachable. |
+| 2 | Bootloader menu via Vol+/Vol− at power-on | Menu unreachable. **See §2a — the earlier explanation for this was wrong and is corrected here.** |
 | 3 | Forced Qualcomm EDL, including with a dedicated EDL cable | Mode reached. Communication with the device works correctly; the device responds to the protocol. |
 | 4 | Flashing the original factory loader from ZUI 18.5.10.037 over Sahara | Transfer complete (1 554 996 B). Device confirms acceptance of the image, but does not start a write session — silence on all commands, then return to diagnostic mode. Repeated many times, identical result. |
 | 5 | Four independent tools (custom USB client, `edl`, `QSaharaServer` + `fh_loader`, LTBox) and two operating systems (Windows and native Linux) | Identical result every time. The problem is not on the computer side nor the tool side. |
 | 6 | Own loader (signed with test keys, image substituted inside the factory file) | Rejected by the boot processor with an error code. Integrity verification covers the entire signed block; without the manufacturer's key this cannot be bypassed. |
 | 7 | Suspicion of insufficient battery voltage | Excluded after 9 hours of charging (full, clean control cycle). |
 | 8 | Measurement of device presence on the USB bus at 0.15 ms resolution during the logo window | During this window the tablet does not appear on the USB bus in any mode. |
+
+### 2a. Correction to test 2 (2026-11-08, late evening)
+
+The original explanation — *"keys not read by the bootloader, because its key GPIOs
+are mapped for AYANEO hardware"* — is **wrong** and must not be passed on.
+
+Checked in this board's own device tree:
+
+```
+&pon_pwrkey { status = "okay"; };
+&pon_resin { linux,code = <KEY_VOLUMEDOWN>; status = "okay"; };
+```
+
+Volume Down is `pon_resin`, a **PMIC PON input**, identical on every Qualcomm
+platform. It is not a TLMM GPIO and cannot be board-mismatched.
+
+Furthermore, `xbl_s.melf` is **not encrypted** and contains XBL's own button
+subsystem: `boot_buttons.c`, `/soc/buttons/buttons-config`, and three explicitly
+named combinations `s2-kpdpwr`, `s2-kpdpwr-resin`, `s2-resin`. XBL reads the keys
+itself, before ABL ever runs.
+
+Revised, measured statement: a watcher that enumerated **every** USB device (no VID
+filter) held Volume Down through a full absence window — 16 s off the bus, zero new
+VID:PID, no fastboot. So the keys do reach the hardware, but the bootloader menu is
+still not produced.
+
+**Most likely reason: ABL never executes.** XBL stops earlier — either rendering its
+own charger screen or being reset by the watchdog (`RST_STAT = 0x3`, bit 1 = WDOG;
+window 7.918 s reproducible to 3 ms across five sessions). If ABL never runs, no key
+read in ABL can matter.
+
 
 **Conclusion:** only the content of the bootloader partitions (`abl_a` / `abl_b`)
 is damaged. The hardware and the lower boot stages are functional. Writing these
@@ -121,6 +152,7 @@ Worth stating explicitly, because a shop that has not seen this device may try:
 | Replace the mainboard as a first step | The fault is in flash content, not hardware. Replacing the board is unnecessary cost. |
 | Flash an ABL from another Lenovo tablet | Different board; this is how the device was bricked. |
 | Assume the eMMC/UFS is failing | Storage responds normally; reads and identification work, only writes are unavailable. |
+| Chase the signing route | Lenovo/Lapis root of trust. The stock ABL carries `Lenovo Root CA1` / `Lapis Root CA1`; the test-signed one carries `qtestsign ... NOT SECURE`. There is no obtainable key, and substituting an image inside the factory container is rejected with `0x21` **before** the substitution point (at byte 1 109 804 vs 1 117 008). Path is closed; do not spend time on it. |
 
 ---
 

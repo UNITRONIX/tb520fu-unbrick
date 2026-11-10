@@ -259,6 +259,7 @@ docs/
   12-bootloader-unlock.md     unlock file over HTTP: endpoint, contents, caveats
   13-hardware-and-drivers.md  silicon, kernel modules, firmware, rooting procedure
   14-edl-mode-switch.md       the 900E → 9008 transition: sequence, variants, pitfalls
+  15-crashdump-memory-access.md  what 900E will read for you, and the DDR training log
 session-notes/                raw translated session logs, unedited
 scripts/                      the tooling, in English, path-parameterised
 ```
@@ -305,6 +306,15 @@ All scripts are standalone, take explicit paths, and print English logs. See
 | `banner_capture.py` | upload, then **listen** instead of talking |
 | `sahara_codes.py` | the NAK table, with the vendor range marked |
 | `usb_watch/FastUsbWatch.cs` | 0.15 ms USB presence watcher, no WMI, no sleeps |
+| `crash_region_probe.py` | list the 53 regions the 900E crash dump will expose |
+| `ddr_map_probe.py` | how far DDR answers, using device-supplied addresses |
+| `ddr_near_probe.py` | fine-grained 4 KiB scan of the DDR exposure boundary |
+| `bootstage_probe.py` | pull crash-context structures and search them for boot evidence |
+| `pmic_state_probe.py` | read `sbl_pmic_dump` and `SHRM_MEM` in 512 KiB chunks |
+| `analyze_shrm.py` | decode the DDR firmware structures in `SHRM_MEM` |
+| `decode_trn_buffers.py` | decide whether DDR training reported a failure |
+| `sahara_exec_9008.py` | Sahara EXECUTE against the real PBL (ver=3), not crashdump |
+| `upload_compare.py` | A/B upload timing; measures the DONE→disappearance window |
 
 ---
 
