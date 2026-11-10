@@ -237,20 +237,69 @@ missing checks, and it is not gated by `lenovolock` on the evidence so far
 
 ---
 
-## 7. Ranked by what would actually help
+## 7. The DDR-before-EDL ordering, and what it means
+
+The chain into EDL, assembled from single-caller relationships, so the order is
+certain rather than inferred (`scripts/ddr_before_edl.py`):
+
+```
+0x148312d4  bl 0x14863198     step 1: read config properties (0x21, 0x13, 0x1b)
+0x148312e0  bl 0x1482e8a8     sbl1_ddr_init          <- single caller
+0x148312e8  bl 0x1482c338     step after DDR init
+...          "boot_dload_entry" logged, then the EDL transport is chosen
+```
+
+**DDR is initialised before EDL is entered, by design.** The Firehose programmer is
+loaded into DRAM and needs working memory to run in. That is why a DDR problem
+presents as "EDL does not work" rather than as a memory fault — and why the two
+cannot be diagnosed separately from the host.
+
+Two structural facts worth keeping:
+
+- `sbl1_ddr_init` has **exactly one caller** in this image; there is no alternate
+  DDR path to reach.
+- the TCSR guard skips only the training **call**. Setup and the timing report run
+  on both branches, and both converge at `0x1482ebd4`.
+
+A correction made during this analysis: `0x1482a91c` was initially read as the EDL
+entry point, but it has ~67 callers and is a logging helper — the
+`"boot_dload_entry"` string is passed to it as a message. The real EDL transport
+call is elsewhere in that function and has not been isolated.
+
+Also noted: the branch taken when the D+ test succeeds carries
+`/sw/boot/fedl_timeout` and the
+`EMERGENCY_DLOAD_TIMEOUT_COOKIE_SET: Powerdown / Reset` messages, so a forced-EDL
+entry has its own timeout policy settable from the device tree.
+
+### And this is where the cable lead stands, honestly
+
+`07-dead-ends.md` §D1 records that an EDL cable **already produced a genuine
+`HELLO ver=3 mode=0` from PBL** — the best state obtainable without opening the
+case — and the programmer still did not start. That is the decisive observation
+about the cable: the path was proven, and proving it did not move the wall.
+
+So forced EDL is interesting as a way to make entry repeatable, not as a way to
+fix anything. The fix has to come from the programmer's behaviour after `DONE`.
+
+---
+
+## 9. Ranked by what would actually help
+
+The ranking changed after the DDR-ordering analysis. Forced EDL drops because it
+has already been proven not to help (§7).
 
 | # | Path | Why it could work | Cost to test |
 |---|---|---|---|
-| 1 | **Forced EDL via D+ low** | boot-ROM level; does not need the failing programmer; connector-only | a cable and correct timing |
-| 2 | Debug policy | would enable EUD/JTAG and relax checks | code reading first |
-| 3 | EUD | bypasses the XML listener entirely | needs policy, probably |
-| 4 | `poke` once Firehose runs | unGated memory write | needs Firehose |
-| 5 | `patch` / `firmwarewrite` | possibly unGated | needs Firehose |
+| 1 | **Debug policy** | would enable EUD/JTAG and relax checks; `min/max-dbg-board-id` are ranges, and a range is a condition | code reading first |
+| 2 | EUD | bypasses the XML listener entirely | probably needs the policy |
+| 3 | `poke` once Firehose runs | memory write **not** covered by the lenovolock gate | needs Firehose |
+| 4 | `patch` / `firmwarewrite` | deprecated code, possibly unGated | needs Firehose |
+| 5 | Forced EDL via D+ low | makes entry repeatable — **but already proven not to fix the hang** | cable work, low value |
 | 6 | Fuse write | state that was set can be examined | high risk, investigate only |
 
 ---
 
-## 8. What this document deliberately does not claim
+## 10. What this document deliberately does not claim
 
 - That forced EDL will work **on this unit**. The code path exists; whether the
   hardware presents D+ in a way that a cable can hold low depends on the connector
