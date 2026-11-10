@@ -227,25 +227,75 @@ work has a known outcome of zero.
 
 ---
 
-## 5. What is still unknown, stated plainly
+## 5. The training decision, decoded
 
-- Whether training actually completes or fails inside `0x1482e8a8`. The DDR
-  training log is **not** reachable: `SHRM_MEM` holds the firmware's static tables
-  but no emission records, and the buffer pointers next to `TRN_ISSUE`
-  (`0x24070000`, `0x24072000`, `0x24075000`) are outside the dumped window and do
-  not answer. See `15-crashdump-memory-access.md` §4.
+The `do_ddr_training, Start` message inside `sbl1_ddr_init` is guarded by a call to
+va `0x1484396c`:
+
+```
+0x1482eb04  bl 0x1482ad04
+0x1482eb0c  bl 0x1484396c
+0x1482eb10  tst w0, #0xff
+0x1482eb14  b.eq 0x1482eb64         w0 == 0 -> skip training
+```
+
+and that callee reads a hardware register:
+
+```
+0x1484396c  movz w8, #0x9000
+0x14843970  movk w8, #0x1fd, lsl #16       w8 = 0x1FD9000
+0x14843974  ldrh w8, [x8]                  16-bit read
+0x14843978  tst  w8, #0x30                 test bits 4 and 5
+0x1484397c  1a9f07e0                       conditional select
+0x14843980  ret
+```
+
+So whether DDR is trained in EDL is decided by **bits `0x30` of a TCSR register at
+physical `0x1FD9000`**. The surrounding strings place this in `boot_ddr.c` on the
+EDL path ("TCSR reg value 0x%x", "Enter PBL EDL USB").
+
+### The register cannot be read from the crash dump
+
+Measured (`probe_tcsr_isolated.py`, one address per session, control read before
+*and* after each):
+
+```
+case                              pre   test   post  verdict
+RST_STAT 0x81b75038                ok     ok     ok   EXPOSED
+TCSR 0x1FD9000 (the DDR guard)     ok     NO     NO   killed the session
+TCSR 0x1FD9004                     ok     NO     NO   killed the session
+TCSR 0x1FD0000 (block base)        ok     NO     NO   killed the session
+DCC_SRAM 0x10080000                ok     ok     ok   EXPOSED
+```
+
+Controls pass where they should and fail immediately after a TCSR access. This is
+not an empty region — it is an address the crash handler terminates on. The TCSR
+block is outside what 900E will serve.
+
+Note the method: the first attempt read four addresses in one session and the
+control *afterwards* also failed, which made the result uninterpretable. Isolation
+was required to tell "not exposed" from "session died".
+
+---
+
+## 6. What is still unknown, stated plainly
+
+- The semantics of bits `0x30` on this SoC, and their value at the moment the
+  programmer runs. TCSR layouts are per-platform and unpublished; the bit meaning
+  cannot be inferred from the number.
+- Whether training is what actually hangs. The guard above shows when training is
+  skipped, not what happens when it runs.
 - Whether the DCB parameters match this board's memory part. The part is identified
-  numerically, and the parameters that training consumes live in a UFS file, not in
-  the xbl_config payloads (§4.1).
-- Whether the hang is even in DDR. `0x1482e8a8` is the DDR *initialisation* entry,
-  which is consistent with the timing but is not proof — the call after it, and the
-  code at `0x148312e8`, could equally be where it stops.
+  numerically, and the parameters training consumes live in a UFS file, not in the
+  xbl_config payloads (§4.1).
+- Whether the DDR training log exists anywhere reachable. `SHRM_MEM` holds the
+  firmware's static tables but no emission records, and the `TRN_ISSUE` buffer
+  pointers (`0x24070000`+) do not answer. See `15-crashdump-memory-access.md` §4.
 
-The difference from before is that these are now questions about **named functions
-at known addresses**, not about an unknown black box. A next session can disassemble
-`0x1482e8a8` directly and follow it stage by stage.
+The difference from before is that these are now questions about **named registers
+and named functions at known addresses**, not about an unknown black box.
 
-## 6. Honest position on the outcome
+## 7. Honest position on the outcome
 
 Nothing here makes the tablet flashable. The write capability is still missing, and
 every host-side path to it has been measured as closed (`07-dead-ends.md`,
