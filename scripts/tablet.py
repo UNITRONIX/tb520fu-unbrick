@@ -128,6 +128,70 @@ def record(event: str, **kv) -> None:
 
 
 # ---- device presence -----------------------------------------------------
+def _usb_enum() -> dict[str, str]:
+    """{instance_id: status} for every present USB node, via SetupAPI.
+
+    Why not PowerShell: `Get-PnpDevice` costs ~1000 ms per call. Two places in this
+    file poll in the single-digit-millisecond range and cannot afford that:
+
+      * `grab_edl_hello` races to be the first opener of the 9008 HELLO - at 1 Hz it
+        loses that race almost every time, and a lost HELLO costs a whole power cycle;
+      * `wait` claims to poll every 20 ms and was really polling every 1000 ms.
+
+    All signatures are declared. Without `argtypes` a HDEVINFO pointer truncates to
+    32 bits and enumeration silently returns nothing, which reads as "no device" -
+    the same trap that produced a confident wrong answer in `watch_unknown.py`.
+    """
+    import ctypes
+    import ctypes.wintypes as wt
+
+    setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
+    DIGCF_PRESENT = 0x02
+    DIGCF_ALLCLASSES = 0x04
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", wt.DWORD), ("Data2", wt.WORD), ("Data3", wt.WORD),
+                    ("Data4", ctypes.c_ubyte * 8)]
+
+    class SP_DEVINFO_DATA(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("ClassGuid", GUID),
+                    ("DevInst", wt.DWORD), ("Reserved", ctypes.c_void_p)]
+
+    setupapi.SetupDiGetClassDevsW.restype = ctypes.c_void_p
+    setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, wt.LPCWSTR,
+                                              ctypes.c_void_p, wt.DWORD]
+    setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
+    setupapi.SetupDiEnumDeviceInfo.argtypes = [ctypes.c_void_p, wt.DWORD,
+                                               ctypes.POINTER(SP_DEVINFO_DATA)]
+    setupapi.SetupDiGetDeviceInstanceIdW.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(SP_DEVINFO_DATA), wt.LPWSTR, wt.DWORD,
+        ctypes.POINTER(wt.DWORD)]
+
+    out: dict[str, str] = {}
+    h = setupapi.SetupDiGetClassDevsW(None, None, None,
+                                      DIGCF_PRESENT | DIGCF_ALLCLASSES)
+    if not h:
+        return out
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        need = wt.DWORD()
+        i = 0
+        while True:
+            dev = SP_DEVINFO_DATA()
+            dev.cbSize = ctypes.sizeof(SP_DEVINFO_DATA)
+            if not setupapi.SetupDiEnumDeviceInfo(h, i, ctypes.byref(dev)):
+                break
+            i += 1
+            if setupapi.SetupDiGetDeviceInstanceIdW(
+                    h, ctypes.byref(dev), buf, 1024, ctypes.byref(need)):
+                s = buf.value
+                if s.upper().startswith("USB\\"):
+                    out[s] = "present"
+    finally:
+        setupapi.SetupDiDestroyDeviceInfoList(h)
+    return out
+
+
 def ports() -> list[str]:
     try:
         return [p.device.upper() for p in serial.tools.list_ports.comports()]
@@ -152,25 +216,30 @@ def com_port(prefer: str | None = None) -> str | None:
 
 
 def pids_present() -> dict[str, str]:
-    """{instance: pid} for every present VID_05C6 node, via SetupAPI."""
+    """{instance: pid} for every present VID_05C6 node."""
     out: dict[str, str] = {}
-    try:
-        raw = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             "Get-PnpDevice -PresentOnly | Where-Object {$_.InstanceId -match 'VID_05C6'}"
-             " | ForEach-Object {$_.InstanceId + '|' + $_.Status}"],
-            capture_output=True, text=True, timeout=25).stdout
-    except Exception:  # noqa: BLE001
-        return out
-    for line in raw.splitlines():
-        line = line.strip()
-        if "VID_05C6" not in line.upper():
-            continue
-        inst = line.split("|")[0]
+    for inst in _usb_enum():
         up = inst.upper()
+        if "VID_05C6" not in up:
+            continue
         i = up.find("PID_")
         out[inst] = up[i + 4:i + 8] if i >= 0 else "?"
     return out
+
+
+def tablet_on_bus() -> bool:
+    """Is the tablet present at all, in ANY of its identities?
+
+    `offcheck` used to ask `pids_present()`, which only looks for VID_05C6 - so a
+    tablet wedged as `VID_0000&PID_0002` read as absent, and the one measurement
+    that function exists to make could not be taken in the state the tablet is
+    actually in. The wedged node counts as present here.
+    """
+    for inst in _usb_enum():
+        up = inst.upper()
+        if "VID_05C6" in up or "VID_0000" in up:
+            return True
+    return False
 
 
 # ---- transport -----------------------------------------------------------
@@ -803,6 +872,21 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def tablet_on_bus() -> bool:
+    """Is the tablet present at all, in ANY of its identities?
+
+    `offcheck` used to ask `pids_present()`, which only looks for VID_05C6 - so a
+    tablet wedged as `VID_0000&PID_0002` read as absent, and the one measurement
+    that function exists to make could not be taken in the state the tablet is
+    actually in. The wedged node counts as present here.
+    """
+    for inst in _usb_enum():
+        up = inst.upper()
+        if "VID_05C6" in up or "VID_0000" in up:
+            return True
+    return False
+
+
 def cmd_offcheck(args) -> int:
     """Decide whether the tablet is genuinely powered off, from the host side.
 
@@ -826,7 +910,7 @@ def cmd_offcheck(args) -> int:
     log(f"#  threshold {threshold:.0f}s  (a key-hold reset returns in ~16 s)")
     log("=" * 70)
 
-    if pids_present():
+    if tablet_on_bus():
         log("  device is PRESENT - not off.")
         log("  To get an off state: unplug the cable, then hold Power well past the")
         log("  15 s reset point. Watch this window while you do it.")
@@ -837,7 +921,7 @@ def cmd_offcheck(args) -> int:
     deadline = time.time() + args.seconds
     verdict_printed = False
     while time.time() < deadline:
-        present = bool(pids_present())
+        present = tablet_on_bus()
         now = time.time()
         if present:
             if start_absent is not None:

@@ -29,3 +29,7 @@
 {"when": "2026-11-11 14:40:40", "event": "edl_hello", "ok": false, "reason": "no-9008"}
 {"when": "2026-11-11 14:40:47", "event": "status", "pids": {}, "com": null}
 {"when": "2026-11-11 14:40:58", "event": "edl_hello", "ok": false, "reason": "no-9008"}
+{"when": "2026-11-11 14:41:13", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:41:37", "event": "offcheck", "away": 0, "verdict": "never-absent"}
+{"when": "2026-11-11 14:41:56", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:42:07", "event": "offcheck", "away": 0, "verdict": "never-absent"}
