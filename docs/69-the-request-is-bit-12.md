@@ -72,13 +72,29 @@ kept colliding on this register:
   low 6 bits        route stamp written by crash handler   docs/61
 ```
 
-> **Note the conflict.** `docs/16` §5 reads bits `0x30` as the training guard, while
-> `uefiplat.cfg` uses bit 4 and bit 5 for dump mode. Both can be true only if the
-> same bits serve two purposes, which is unlikely. **One of the two readings is
-> wrong and this document does not settle which** - the `uefiplat.cfg` comment is
-> explicit ("for full dump 0x10"), the training-guard reading came from disassembly
-> that was never cross-checked against a document. Recorded as an open contradiction
-> rather than silently choosing.
+> **RESOLVED (same session).** The apparent conflict is not one. All five functions
+> that touch `0x1FD9000` were read together:
+>
+> ```
+> 0x1484396c  ldrh ; tst #0x30 ; csinc        READS bits 4+5
+> 0x14843984  ldrh ; orr #0x10 ; strh         WRITES bit 4
+> 0x14843998  ldrh ; orr #0x20 ; strh         WRITES bit 5
+> 0x1484383c  ldrh ; and #0x30 ; ret          RETURNS bits 4+5
+> 0x14843a90  ldrh ; tbnz #12                 READS bit 12
+> ```
+>
+> Bits 4 and 5 are a **two-bit field**: `0x10` = full dump, `0x20` = minidump,
+> written by the two setters and read as a field by the two getters. `docs/16`
+> called the getter "the DDR training guard" and `uefiplat.cfg` calls the field
+> "dump mode" - **both describe the same field from different ends**. There is no
+> contradiction, only a name that was assigned before the writer was found.
+>
+> Bit 12 is separate: it says *a* dump was requested, while bits 4/5 say *which
+> kind*.
+>
+> The earlier paragraph is kept because the reasoning that produced the "conflict"
+> is itself instructive: two documents named one field differently and neither had
+> seen the setters.
 
 ## 4. What this gives the goal
 
