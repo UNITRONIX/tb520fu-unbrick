@@ -33,9 +33,9 @@ function Assert-Admin {
 }
 
 function Show-Node {
-    param([string]$Pid)
+    param([string]$PidFilter)
     $dev = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-        Where-Object { $_.InstanceId -match "VID_05C6&PID_$Pid" }
+        Where-Object { $_.InstanceId -match "VID_05C6&PID_$PidFilter" }
     if (-not $dev) {
         Write-Host "  not present" -ForegroundColor DarkGray
         return $null
@@ -50,17 +50,17 @@ function Show-Node {
 
 Assert-Admin
 
-Write-Host "=" * 72
+Write-Host ("=" * 72)
 if ($RestoreWinUSB) {
     Write-Host "  RESTORE: rebind the node to WinUSB"
 } else {
     Write-Host "  SWITCH: bind 05C6:$TargetPid to the Qualcomm serial driver"
 }
-Write-Host "=" * 72
+Write-Host ("=" * 72)
 
 # ---- current state ---------------------------------------------------------
 Write-Host "`nCurrent node:"
-$dev = Show-Node -Pid $TargetPid
+$dev = Show-Node -PidFilter $TargetPid
 if (-not $dev) {
     Write-Host "`nThe device is not at $TargetPid." -ForegroundColor Yellow
     if (-not $RestoreWinUSB) {
@@ -104,7 +104,7 @@ if ($RestoreWinUSB) {
     }
 
     Write-Host "`nAfter rebinding:" -ForegroundColor Green
-    Show-Node -Pid $TargetPid | Out-Null
+    Show-Node -PidFilter $TargetPid | Out-Null
     Write-Host "`nA WinUSB node should show service=WinUSB again."
     exit 0
 }
@@ -126,20 +126,21 @@ Write-Host "`nINF lists PID_$TargetPid  - good."
 Write-Host "`nStaging and installing the driver package..."
 pnputil /add-driver $SerialInf /install
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "pnputil returned $LASTEXITCODE" -ForegroundColor Yellow
+    Write-Host "pnputil returned $LASTEXITCODE (non-zero can still mean 'already staged')" -ForegroundColor Yellow
 }
 
 Write-Host "`nForcing the driver onto the live node..."
 foreach ($d in $dev) {
-    Write-Host "  $($d.InstanceId)"
-    # devcon is not present by default; pnputil can update a device with /add-driver
-    # once the package is staged and the hardware id matches.
-    pnputil /scan-devices | Out-Null
-    Start-Sleep -Seconds 2
+    Write-Host "  restarting $($d.InstanceId)"
+    # Adding a package does not guarantee it wins over the already-bound WinUSB INF.
+    # Restarting the node makes PnP re-evaluate driver ranking, which is the step that
+    # actually applies the new binding when a better-ranked match now exists.
+    pnputil /restart-device "$($d.InstanceId)"
+    Start-Sleep -Seconds 3
 }
 
 Write-Host "`nAfter switching:" -ForegroundColor Green
-Show-Node -Pid $TargetPid | Out-Null
+Show-Node -PidFilter $TargetPid | Out-Null
 
 Write-Host "`nLooking for a new COM port..."
 $ports = Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue |
