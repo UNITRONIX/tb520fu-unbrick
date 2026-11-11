@@ -8,8 +8,9 @@ This directory is organised so you can read only what you need.
    2.  `87-current-blocker-needs-a-physical-action.md` - what to do next, and what is not possible from a PC
    3.  `99-volplus-wedges-again-and-the-hub-never-blocked-9008.md` - the entry method that actually works: no keys
    4.  `82-sibling-recovered-and-firehose-works-on-this-model.md` - proof the device is recoverable
-    4.  `88-the-battery-disconnect-procedure.md` + `90-official-service-manual-found.md` - the documented recovery path
-    5.  `07-dead-ends.md` - everything already tried, so you do not repeat it
+   5.  `106-preflight.md` - check the desk side first: `python scripts/preflight.py`
+   6.  `88-the-battery-disconnect-procedure.md` + `90-official-service-manual-found.md` - the documented recovery path
+   7.  `07-dead-ends.md` - everything already tried, so you do not repeat it
 
 Everything else is background.
 
@@ -105,6 +106,7 @@ anything older:
 | a hub-port cycle can clear the wedge | `102-what-the-hub-can-and-cannot-do.md` | `CYCLE_PORT` needs a USB 3.0 hub (this one is 2.0); `RESET_HUB` is accepted and does nothing |
 | nothing host-side can clear the wedge | `103-host-side-unwedge-routes-all-but-one-closed.md` | hub routes are closed; **devnode remove + rescan is untested** (`pnputil` needs elevation, `Remove-WedgedNode.ps1` does it) |
 | a driver binding applies to the device | `105-driver-binding-is-per-port.md` | it applies per SOCKET; only 2 of 11 tablet instances can expose a COM port |
+| the desk side needs no checking | `106-preflight.md` | three separate false failures came from preconditions nobody checked; `preflight.py` asserts them |
 | the goal only needs one success | `104-the-repeatability-ledger.md` | the goal says *repeatable*; `attempts.py` counts attempts and refuses an unbacked success |
 
 ## Conventions used in these documents
