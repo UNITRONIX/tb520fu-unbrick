@@ -154,6 +154,34 @@ def raw_read(held: Held, length: int, timeout: float = 25.0) -> bytes:
     return bytes(got)
 
 
+def arm_hard_exit(seconds: float) -> None:
+    """Guarantee the process dies, even if a loop is wedged.
+
+    A catcher that outlives its budget still holds the COM handle, and an
+    abandoned handle makes every later session fail with "access denied" or a
+    mute port - the trap recorded in docs/07 F1. The port was in fact left
+    claimed once during this session and had to be freed by hand. A timer thread
+    makes that impossible regardless of what the loops are doing.
+    """
+    import threading
+
+    def _expire() -> None:
+        log(f"  hard deadline {seconds:.0f}s reached - exiting to release the port")
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            # os._exit, not sys.exit: a blocked read in a C extension will not
+            # unwind through an exception, and unwinding is not the point - the
+            # point is that the handle is released now.
+            import os
+            os._exit(2)
+
+    t = threading.Timer(seconds, _expire)
+    t.daemon = True
+    t.start()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="COM10")
@@ -162,6 +190,7 @@ def main() -> int:
     port = args.port.upper()
     OUT.mkdir(exist_ok=True)
     end = time.time() + args.seconds
+    arm_hard_exit(args.seconds + 20.0)
 
     log("=" * 74)
     log("#  hold_and_catch - one handle held across the power cycle")
