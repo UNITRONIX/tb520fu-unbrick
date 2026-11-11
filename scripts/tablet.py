@@ -450,6 +450,87 @@ def cmd_bump(args) -> int:
             log("  NOTE: the port was closed without a reset on purpose (docs/34)")
 
 
+def cmd_catch(args) -> int:
+    """Hold a handle through a power cycle and grab the HELLO the moment it exists.
+
+    Route (a) of the goal: 900E -> 9008 needs a fresh HELLO, and the HELLO is
+    consumed by the first opener. Measured facts this command is built around:
+
+      * one HELLO per boot; a spent one never comes back (docs/34);
+      * SAHARA_RESET does not produce another, and it destroys the port;
+      * so the handle must be held BEFORE the cycle, and the read must be the
+        first thing that happens on the new node.
+
+    The earlier attempt lost 16.5 s between the handle dying and the reopen,
+    because it re-checked the port list instead of just retrying open(). Here the
+    retry loop calls open() directly every 2 ms, which is the shortest path to
+    the new node.
+    """
+    port = (args.port or com_port())
+    if port is None:
+        # The node cycles on its own between attempts, so absence now is not a
+        # reason to refuse: poll for it, then start holding.
+        log("  no Qualcomm port yet - waiting for one (power the tablet on)")
+        end = time.time() + args.seconds
+        while time.time() < end and port is None:
+            time.sleep(0.02)
+            port = com_port()
+        if port is None:
+            log("  no Qualcomm port appeared")
+            record("catch", ok=False, reason="no-port")
+            return 1
+    port = port.upper()
+    log(f"  holding {port}. If you have not reset yet: hold Power ~15 s, then power on.")
+
+    deadline = time.time() + args.seconds
+    deaths = 0
+    link = None
+    try:
+        while time.time() < deadline:
+            if link is None:
+                try:
+                    link = Link(port)
+                    log(f"  handle open (death #{deaths})")
+                except Exception:  # noqa: BLE001
+                    time.sleep(0.002)
+                    continue
+
+            pkt = link.packet(2.0)
+            if pkt is None:
+                if link.dead or link.errors:
+                    # Any error while holding means the device re-enumerated.
+                    # `errors` is checked, not just `dead`, because in a held
+                    # session the very FIRST read error is already the cycle -
+                    # waiting for eight costs seconds we do not have.
+                    link.close()
+                    link = None
+                    deaths += 1
+                    log(f"  handle died (death #{deaths}) - reconnecting")
+                continue
+
+            cmd = struct.unpack_from("<I", pkt, 0)[0]
+            if cmd != CMD_HELLO_REQ:
+                log(f"  packet {NAMES.get(cmd, hex(cmd))} - ignored")
+                continue
+
+            ver = struct.unpack_from("<I", pkt, 8)[0]
+            mode = struct.unpack_from("<I", pkt, 20)[0]
+            log(f"  *** HELLO ver={ver} mode={mode} ***")
+            record("catch", ok=True, ver=ver, mode=mode, deaths=deaths)
+            if mode == MODE_MEMORY_DEBUG:
+                log("  crashdump HELLO. Run `bump` now, or `read` for memory.")
+            elif mode == MODE_IMAGE_TX:
+                log("  IMAGE_TX - this is already the EDL state the goal wants.")
+            return 0
+
+        log(f"  {args.seconds:.0f}s elapsed with no HELLO")
+        record("catch", ok=False, reason="timeout", deaths=deaths)
+        return 1
+    finally:
+        if link:
+            link.close()          # never a reset - see Link.close()
+
+
 def cmd_selftest(_args) -> int:
     """Prove the toolchain works without touching the device's state."""
     log("=" * 70)
@@ -533,6 +614,11 @@ def main() -> int:
 
     s = sub.add_parser("selftest", help="verify the toolchain, change nothing")
     s.set_defaults(fn=cmd_selftest)
+
+    s = sub.add_parser("catch", help="hold a handle across a power cycle and grab the HELLO")
+    s.add_argument("--port", default=None)
+    s.add_argument("--seconds", type=float, default=180)
+    s.set_defaults(fn=cmd_catch)
 
     args = ap.parse_args()
     return args.fn(args)
