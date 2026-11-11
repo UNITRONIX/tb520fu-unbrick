@@ -78,3 +78,9 @@ desktop.ini
 # Working copy of Lenovo tools used for COM-world attempts.
 com_attempt/
 
+
+# Large DDR dumps and extracted content
+com_attempt/*.BIN
+com_attempt/real_content/
+com_attempt/*.txt
+
