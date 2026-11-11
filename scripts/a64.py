@@ -345,12 +345,52 @@ def decode(insn: int, pc: int) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--melf", required=True)
+    ap.add_argument("--melf", default=None)
+    ap.add_argument("--elf", default=None,
+                    help="a standalone ELF instead of a melf inner image")
     ap.add_argument("--image", type=int, default=2,
                     help="1..4 for the melf's inner images")
     ap.add_argument("--offset", type=lambda x: int(x, 0), required=True)
     ap.add_argument("--count", type=int, default=40)
     args = ap.parse_args()
+
+    if args.elf:
+        # The crash-dump handler (XblRamdump.elf) is the code that runs in the
+        # state this tablet is stuck in, so being able to read it matters as much
+        # as the melf images. Same decoder, its own program headers.
+        raw = Path(args.elf).read_bytes()
+        if raw[:4] != b"\x7fELF":
+            print("not an ELF")
+            return 2
+        e_phoff = struct.unpack_from("<Q", raw, 0x20)[0]
+        e_phentsize, e_phnum = struct.unpack_from("<HH", raw, 0x36)
+        segs = []
+        for i in range(e_phnum):
+            o = e_phoff + i * e_phentsize
+            ptype = struct.unpack_from("<I", raw, o)[0]
+            poff, pvaddr, _pp, pfilesz, _pm = struct.unpack_from("<QQQQQ", raw, o + 8)
+            if ptype == 1 and pfilesz:
+                segs.append((poff, pvaddr, pfilesz))
+
+        def o2v_elf(o: int):
+            for po, v, f in segs:
+                if po <= o < po + f:
+                    return v + (o - po)
+            return None
+
+        for i in range(args.count):
+            o = args.offset + i * 4
+            if o + 4 > len(raw):
+                break
+            insn = struct.unpack_from("<I", raw, o)[0]
+            va = o2v_elf(o)
+            va_s = f"{va:#012x}" if va is not None else "------------"
+            print(f"  {o:#08x}  {va_s}  {insn:08x}  {decode(insn, va or o)}")
+        return 0
+
+    if not args.melf:
+        print("give --melf or --elf")
+        return 2
 
     imgs = {1: (0x001300, 203888), 2: (0x032F70, 908256),
             3: (0x110B50, 303096), 4: (0x15AB48, 148924)}
