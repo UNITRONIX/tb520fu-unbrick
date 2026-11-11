@@ -111,6 +111,7 @@ anything older:
 | leaving it unplugged for 30-60 min is a discharge | `110-five-hours-unplugged-changed-nothing.md` | **measured: 5 h 46 min unplugged changed nothing** - the battery keeps the always-on domain alive |
 | the cold-boot experiment cannot be verified | `108-the-cold-boot-gate-is-decidable.md` | `cold_boot_check.py` reads the XBL log and reproduces docs/58 from the bytes |
 | the D+ short window is ~50 ms at power-on | `109-fedl-decision-timed-from-the-log.md` | `boot_fedl_check` runs at **~1036 ms**, AFTER the firmware's own D+ toggle at ~800 ms |
+| a wedge means the USB path is dead | `111-the-short-attempt-trained-the-phy.md` | after the short attempt the hub reports **FullSpeed**, so the PHY trains; only the descriptor is zeros |
 | the goal only needs one success | `104-the-repeatability-ledger.md` | the goal says *repeatable*; `attempts.py` counts attempts and refuses an unbacked success |
 
 ## Conventions used in these documents

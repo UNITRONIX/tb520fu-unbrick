@@ -1,0 +1,3 @@
+label: verify-verdict
+when: 2026-11-11 20:31:52
+purpose: D+ short attempt; find the matching boot log with fedl_latch.py
