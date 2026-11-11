@@ -107,6 +107,8 @@ anything older:
 | nothing host-side can clear the wedge | `103-host-side-unwedge-routes-all-but-one-closed.md` | hub routes are closed; **devnode remove + rescan is untested** (`pnputil` needs elevation, `Remove-WedgedNode.ps1` does it) |
 | a driver binding applies to the device | `105-driver-binding-is-per-port.md` | it applies per SOCKET; only 2 of 11 tablet instances can expose a COM port |
 | the desk side needs no checking | `106-preflight.md` | three separate false failures came from preconditions nobody checked; `preflight.py` asserts them |
+| one power cycle is as good as another | `107-the-cheapest-experiment-was-never-run.md` | every cycle so far was a key-hold reset; a discharge has **never** been performed |
+| the cold-boot experiment cannot be verified | `108-the-cold-boot-gate-is-decidable.md` | `cold_boot_check.py` reads the XBL log and reproduces docs/58 from the bytes |
 | the goal only needs one success | `104-the-repeatability-ledger.md` | the goal says *repeatable*; `attempts.py` counts attempts and refuses an unbacked success |
 
 ## Conventions used in these documents
