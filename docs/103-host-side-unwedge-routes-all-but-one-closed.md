@@ -1,8 +1,8 @@
-# Un-wedging: every host-side route measured and closed
+# Un-wedging: every host-side route measured, and one still untested
 
-The question "can the wedge be cleared without touching the cable?" now has a complete,
-measured answer. This document is the record of what was tried, in the order it was tried,
-because three of the four attempts *looked* like they worked.
+The question "can the wedge be cleared without touching the cable?" now has a nearly
+complete, measured answer. This document is the record of what was tried, in the order it was
+tried, because three of the attempts *looked* like they worked.
 
 ---
 
@@ -14,6 +14,20 @@ because three of the four attempts *looked* like they worked.
 | hub reset | `IOCTL_USB_RESET_HUB` `0x0022044C` | **accepted, then nothing** | silent no-op on this hub |
 | port cycle on the tablet's hub | `IOCTL_USB_CYCLE_PORT` `0x00220480` | `err 87` for six buffer shapes | not implemented by this USB 2.0 hub |
 | port cycle on an empty USB 3.0 root port | same | `err 50` (`ERROR_NOT_SUPPORTED`) | not implemented on this platform at all |
+| rewrite the retry budget | `Set-ItemProperty EnumerationRetryCount 0` | `Żądany dostęp do rejestru jest niedozwolony` | needs SYSTEM, not administrator |
+| devnode remove + rescan | `pnputil /remove-device` | `Odmowa dostępu` (5) | needs elevation |
+| bus rescan alone | `pnputil /scan-devices` | `Odmowa dostępu` (5) | needs elevation |
+
+The last three rows were added after the first four were already conclusive, because they act on a
+different layer: the first four act on the **hub**, the last three on the **devnode** or the
+registry. `remove-device` followed by `scan-devices` is the one that would actually matter - it
+drops the failed node and makes the stack re-report the bus, which spends the descriptor-retry
+budget again. It is unimplemented here only for want of a privileged token, not for a technical
+reason, so it is recorded as **untested** rather than closed. `scripts/Remove-WedgedNode.ps1`
+performs it with elevation, `-DryRun` first.
+
+A watcher running through the whole window confirmed no effect from anything attempted
+unelevated: one sample, no arrivals, no departures.
 
 The distinction between 87 and 50 is what makes the last row conclusive. `87` can mean
 "wrong arguments"; `50` from a **free** port on the root hub, where no device state can be
