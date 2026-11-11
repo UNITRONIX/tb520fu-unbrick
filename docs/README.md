@@ -109,6 +109,7 @@ anything older:
 | the desk side needs no checking | `106-preflight.md` | three separate false failures came from preconditions nobody checked; `preflight.py` asserts them |
 | one power cycle is as good as another | `107-the-cheapest-experiment-was-never-run.md` | every cycle so far was a key-hold reset; a discharge has **never** been performed |
 | the cold-boot experiment cannot be verified | `108-the-cold-boot-gate-is-decidable.md` | `cold_boot_check.py` reads the XBL log and reproduces docs/58 from the bytes |
+| the D+ short window is ~50 ms at power-on | `109-fedl-decision-timed-from-the-log.md` | `boot_fedl_check` runs at **~1036 ms**, AFTER the firmware's own D+ toggle at ~800 ms |
 | the goal only needs one success | `104-the-repeatability-ledger.md` | the goal says *repeatable*; `attempts.py` counts attempts and refuses an unbacked success |
 
 ## Conventions used in these documents
