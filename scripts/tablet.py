@@ -91,6 +91,36 @@ def log(m: str = "") -> None:
     print(f"[{time.time() - T0:7.3f}] {m}", flush=True)
 
 
+def log_attempt(route: str, keys: str, outcome: str,
+                ver: int | None = None, mode: int | None = None) -> None:
+    """Append one row to scripts/attempts.jsonl, the repeatability ledger.
+
+    The goal asks for a *repeatable* result, and a result that is only described in prose
+    cannot be counted. This is called from the tools themselves so the ledger fills up
+    whether or not anyone remembers to write a row by hand.
+
+    Failures here are swallowed on purpose: losing a ledger row must never abort a run
+    that is mid-handshake with the device.
+    """
+    try:
+        import attempts as A
+        row = {
+            "when": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "route": route,
+            "keys": keys,
+            "orientation": None,
+            "outcome": outcome,
+            "hello_ver": ver,
+            "hello_mode": mode,
+            "capture": A.last_capture(),
+            "note": "auto-recorded by tablet.py",
+        }
+        with A.LEDGER.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+    except Exception as err:  # noqa: BLE001
+        log(f"  (could not record the attempt: {type(err).__name__})")
+
+
 def save_hello_capture(pkt: bytes, source: str) -> str:
     """Write the raw HELLO packet to disk, and say where.
 
@@ -492,6 +522,10 @@ def grab_edl_hello(timeout: float) -> int:
         mode = struct.unpack_from("<I", pkt, 20)[0]
         log(f"  *** HELLO ver={ver} mode={mode} on {cp} ***")
         save_hello_capture(pkt, "edl-9008")
+        log_attempt(route="catch", keys="none",
+                    outcome=("success" if (ver == 3 and mode == MODE_IMAGE_TX)
+                             else "9008-mute"),
+                    ver=ver, mode=mode)
         record("edl_hello", ok=(ver == 3 and mode == MODE_IMAGE_TX),
                ver=ver, mode=mode, port=cp)
         if ver == 3 and mode == MODE_IMAGE_TX:
@@ -859,6 +893,10 @@ def cmd_catch(args) -> int:
             log(f"  *** HELLO ver={ver} mode={mode} ***")
             save_hello_capture(pkt, "catch")
             record("catch", ok=True, ver=ver, mode=mode, deaths=deaths)
+            log_attempt(route="catch", keys="none", outcome=(
+                "success" if (ver == 3 and mode == MODE_IMAGE_TX)
+                else "900e" if mode == MODE_MEMORY_DEBUG else "9008-mute"),
+                ver=ver, mode=mode)
             if mode == MODE_MEMORY_DEBUG:
                 # CORRECTION to what this used to print: "run `bump` now" could
                 # never work. bump opens its own handle, and the HELLO is spent the
