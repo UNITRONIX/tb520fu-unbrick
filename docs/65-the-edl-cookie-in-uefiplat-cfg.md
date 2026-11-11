@@ -92,7 +92,35 @@ inferred one:
 Both are in regions that matter, and neither is reachable from the host today -
 the standing blocker. But their **meaning** is no longer a guess.
 
-## 5. What is not claimed
+## 5. Which config the running UEFI actually reads — checked
+
+`uefi.elf` contains two config names. Counting them:
+
+```
+"uefiplat.cfg"    4 occurrences
+"uefiplatLA.cfg"  1 occurrence
+```
+
+and the single `PlatConfigFileName` entry points at the LA variant:
+
+```
+PlatConfigFileName = "uefiplatLA.cfg"
+OsTypeString = "LA"
+```
+
+**So the running image selects `uefiplatLA.cfg`.** There is exactly **one** block
+carrying cookie values in the whole image (`0x51206`), and it is the one quoted in
+§1 - `DloadCookieAddr = 0x01FD9000`, `DloadCookieValue = 0x10`.
+
+There is also **no separate `.cfg` file in the ROM package** - the only files with
+"cfg" in the name are `aop_devcfg.mbn` and `devcfg.mbn`, neither of which is a
+platform config. So the values above are not a stale copy of a file that lives
+elsewhere; they are the values built into the image that runs.
+
+That closes the caveat `docs/65` §5 raised: the config is not merely *present* in the
+image, it is the one the image selects by name.
+
+## 6. What is not claimed
 
 - The config is read from the file on disk; it is **not** confirmed that this exact
   copy is what the running UEFI used. Its presence in the APPSBL image that XBL
@@ -102,7 +130,7 @@ the standing blocker. But their **meaning** is no longer a guess.
 - Whether writing `0x10` from the host would be sufficient to reach EDL is untested -
   and cannot be tested without a Sahara session, which is the blocker.
 
-## 6. Why this matters more than another dead end
+## 7. Why this matters more than another dead end
 
 Four documents inferred the same register from three different directions. A
 configuration file in an image we already had states it outright, with a comment
