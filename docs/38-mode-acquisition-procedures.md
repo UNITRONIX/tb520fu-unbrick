@@ -21,7 +21,14 @@ python scripts/tablet.py <command>
 | `selftest` | verifies the whole chain, changes nothing | nothing |
 | `wait --want 900e` | polls until the mode appears | nothing |
 | `read --region DDR_DATA` | HELLO → MEMORY_DEBUG → read a region | HELLO_RSP only |
-| `bump` | 900E → 9008 | mode-switch commands |
+| `bump` | 900E → 9008, then grabs the 9008 HELLO | mode-switch commands |
+| `catch` | holds a handle across a power cycle, reads the HELLO, switches **on that handle**, grabs the 9008 HELLO | mode-switch commands |
+| `edl-hello` | reads the HELLO off a 9008 node already present | nothing |
+
+**CORRECTION (docs/100).** This file used to describe `bump` and `wait --want 9008`
+as two steps. That could never work: the HELLO is consumed by the first opener, so a
+second process finds silence. Both callers now do the switch on the handle that holds
+the HELLO, and `catch` covers the whole of route (a) in one command.
 
 Everything else in `scripts/` that talked to this tablet has been moved to
 `scripts/_superseded/` and must not be used. Eight overlapping catchers existed
@@ -87,10 +94,13 @@ the board has really power-cycled.
 **Verified to work, twice, from a fresh 900E.**
 
 ```
-python scripts/tablet.py selftest        # confirm bytes pending
-python scripts/tablet.py bump
-python scripts/tablet.py wait --want 9008 --seconds 60
+python scripts/tablet.py catch --seconds 180
 ```
+
+One command: it holds a handle across the power cycle, reads the mode=2 HELLO, runs the
+switch **on that same handle**, then races for the 9008 HELLO and reports whether it is
+`ver=3 mode=0`. This replaces the old `bump` + `wait` pair, which could not work - see
+`100-the-two-process-bump-could-never-work.md`.
 
 The bump sequence, and what each reply means:
 
@@ -115,6 +125,11 @@ The sequence is documented and was measured working. It cannot be exercised
 right now because precondition 1 fails: the node emits no HELLO even on a cold
 boot with a single handle held throughout (`35-no-hello-after-cold-boot.md`).
 The procedure is kept frozen because the sequence itself is not in question.
+
+**Addendum (docs/100):** the tool that implemented this sequence had the switch and
+the 9008 grab in two separate processes, which cannot work - the HELLO is spent by the
+first opener. `catch` now does both on one handle, and `test_switch_flow.py` checks the
+host half of the exchange. The device half still needs a real run.
 
 ---
 
