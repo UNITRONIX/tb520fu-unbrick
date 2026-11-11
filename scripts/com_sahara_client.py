@@ -86,8 +86,18 @@ class SerialLink:
     read() equals one packet. The USB ZLP rule does not apply here.
     """
 
-    def __init__(self, port: str, baud: int, timeout: float = 3.0) -> None:
+    def __init__(self, port: str, baud: int, timeout: float = 3.0,
+                 dtr: bool | None = None, rts: bool | None = None) -> None:
         self.ser = serial.Serial(port, baud, timeout=0.2, write_timeout=3.0)
+        # pyserial asserts DTR and RTS when it opens a port. On this device that is
+        # a real signal change on the USB CDC side, and it is the one difference
+        # between our open and the vendor tool's: QSaharaServer received a genuine
+        # HELLO on the same port where our reader sees silence. Setting these
+        # explicitly, after open, lets us test whether that is the cause.
+        if dtr is not None:
+            self.ser.dtr = dtr
+        if rts is not None:
+            self.ser.rts = rts
         self.buf = b""
         self.timeout = timeout
         # A dead port raises on every call forever. Without this counter the read

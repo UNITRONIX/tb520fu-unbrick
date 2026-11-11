@@ -1,4 +1,4 @@
-# Switch the Qualcomm 900E/9008 node between the COM driver and WinUSB.
+# Switch the Qualcomm 900E/9008 node between the Qualcomm COM driver and WinUSB.
 #
 # Why this is needed
 # ------------------
@@ -14,10 +14,16 @@
 #   2. power cycle the tablet
 #   3. catch the HELLO with the libusb client
 #
-# The switch is reversible: -To COM restores the Qualcomm driver, which is what
-# QSaharaServer / fh_loader / QFIL need.
+# Method
+# ------
+# pnputil /update-driver does not exist on this Windows build, and remove-device
+# plus rescan does not rebind: the Qualcomm COM package simply wins the ranking
+# again. docs/07 F3/F4 recorded the same thing. The route that works here is
+# UpdateDriverForPlugAndPlayDevicesW with INSTALLFLAG_FORCE, called on the live
+# device instance with the full path to the WinUSB INF from the driver store.
 #
-# Requires elevation (device driver changes).
+# Requires elevation. Reversible: -To COM deletes the libwdi packages and rescans,
+# which lets the Qualcomm driver take the node back for QSaharaServer / fh_loader.
 #
 # Usage
 #   .\Switch-DeviceDriver.ps1 -Status
@@ -39,138 +45,161 @@ function Log($m) {
     Add-Content -Path $log -Value $line
 }
 
-function Show-State {
-    $nodes = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+# ---- P/Invoke: the documented way to force a driver on a live instance --------
+if (-not ('NewDevApi' -as [type])) {
+    Add-Type -Namespace '' -Name 'NewDevApi' -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("newdev.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern bool UpdateDriverForPlugAndPlayDevicesW(
+    System.IntPtr hwndParent,
+    string HardWareId,
+    string FullInfPath,
+    uint InstallFlags,
+    out bool bRebootRequired);
+
+[System.Runtime.InteropServices.DllImport("setupapi.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern bool SetupDiGetINFClassW(
+    string InfName, ref System.Guid ClassGuid, System.Text.StringBuilder ClassName,
+    uint ClassNameSize, out uint RequiredSize);
+'@
+}
+
+$INSTALLFLAG_FORCE = 0x00000001
+$INSTALLFLAG_NONINTERACTIVE = 0x00000004
+
+function Get-QualcommNodes {
+    Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
         Where-Object { $_.InstanceId -match 'VID_05C6' }
-    if (-not $nodes) {
-        Log 'no VID_05C6 node present'
-        return
-    }
+}
+
+function Get-NodeService($instanceId) {
+    $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$instanceId"
+    (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).Service
+}
+
+function Show-State {
+    $nodes = Get-QualcommNodes
+    if (-not $nodes) { Log 'no VID_05C6 node present'; return }
     foreach ($n in $nodes) {
-        $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($n.InstanceId)"
-        $svc = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).Service
-        $inf = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).Driver
-        Log ("{0}  service={1}  inf={2}  status={3}" -f $n.InstanceId, $svc, $inf, $n.Status)
+        $svc = Get-NodeService $n.InstanceId
+        Log ("{0}  service={1}  status={2}" -f $n.InstanceId, $svc, $n.Status)
     }
-    Log ("COM ports: " + ((Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue |
-        ForEach-Object { "$($_.DeviceID)=$($_.Name)" }) -join '; '))
+    $ports = Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue |
+        ForEach-Object { "$($_.DeviceID) ($($_.Name))" }
+    Log ("COM ports: " + ($ports -join '; '))
+}
+
+# Find an INF package in the driver store by provider + the PID it covers.
+function Find-DriverInf {
+    param([string]$ProviderPattern, [string]$PidPattern)
+    $raw = & pnputil /enum-drivers 2>&1
+    $blocks = ($raw -join "`n") -split "`r?`n`r?`n"
+    $hits = @()
+    foreach ($b in $blocks) {
+        $pub = [regex]::Match($b, 'Published Name:\s+(\S+\.inf)')
+        if (-not $pub.Success) { continue }
+        $prov = [regex]::Match($b, 'Provider Name:\s+(.+)')
+        $sign = [regex]::Match($b, 'Signer Name:\s+(.+)')
+        $text = $b
+        if ($text -match $ProviderPattern -and $text -match $PidPattern) {
+            $hits += [pscustomobject]@{
+                Published = $pub.Groups[1].Value.Trim()
+                Provider  = if ($prov.Success) { $prov.Groups[1].Value.Trim() } else { '' }
+                Signer    = if ($sign.Success) { $sign.Groups[1].Value.Trim() } else { '' }
+            }
+        }
+    }
+    $hits | Sort-Object Published -Unique
 }
 
 Log '=== Switch-DeviceDriver ==='
 
-# ---- elevation check ----
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $pr = New-Object Security.Principal.WindowsPrincipal($id)
 if (-not $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Log 'ERROR: not elevated. Re-run this script from an Administrator PowerShell.'
+    Log 'ERROR: not elevated.'
+    Log 'Open PowerShell with "Run as administrator", cd to this folder, and re-run.'
     exit 1
 }
 Log "elevated as $($id.Name)"
 
 if ($Status -or -not $To) {
     Show-State
+    Log '--- available packages ---'
+    foreach ($h in (Find-DriverInf -ProviderPattern 'libwdi' -PidPattern '900E|9008')) {
+        Log ("  WinUSB-ish: {0}  provider={1}" -f $h.Published, $h.Provider)
+    }
+    foreach ($h in (Find-DriverInf -ProviderPattern 'Qualcomm' -PidPattern '9008|900E')) {
+        Log ("  Qualcomm  : {0}  provider={1}" -f $h.Published, $h.Provider)
+    }
     if (-not $To) { Log 'no -To given; nothing changed' }
     exit 0
 }
 
-# ---- locate the WinUSB driver package (libwdi / Zadig) ----
-# pnputil is the supported way on this Windows build; /update-driver does not
-# exist here (docs/07 F3), so we enumerate and then force on the live node.
-$targetPids = @('PID_900E', 'PID_9008')
-
-function Find-WinUsbInf {
-    $cands = & pnputil /enum-drivers 2>&1
-    $blocks = ($cands -join "`n") -split "`r?`n`r?`n"
-    $found = @()
-    foreach ($b in $blocks) {
-        if ($b -match 'WinUSB' -and $b -match 'oem\d+\.inf') {
-            $inf = [regex]::Match($b, '(oem\d+\.inf)').Groups[1].Value
-            $found += $inf
-        }
-    }
-    return $found | Select-Object -Unique
-}
-
 if ($To -eq 'WinUSB') {
-    Log 'target: WinUSB (libusb)'
+    Log 'target: WinUSB (for libusb / pyusb)'
 
-    $inf = Find-WinUsbInf
-    if (-not $inf) {
-        Log 'ERROR: no WinUSB driver package found in the driver store.'
-        Log 'Install one first (Zadig, or libwdi) and re-run.'
+    $infNames = Find-DriverInf -ProviderPattern 'libwdi' -PidPattern '900E'
+    if (-not $infNames) { $infNames = Find-DriverInf -ProviderPattern 'libwdi' -PidPattern '9008' }
+    if (-not $infNames) {
+        Log 'ERROR: no libwdi WinUSB package covering 900E/9008 in the driver store.'
         exit 1
     }
-    Log ("WinUSB packages: " + ($inf -join ', '))
 
-    foreach ($n in (Get-PnpDevice -PresentOnly | Where-Object {
-                $_.InstanceId -match 'VID_05C6' })) {
-        $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($n.InstanceId)"
-        $cur = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).Service
-        Log "node $($n.InstanceId) currently service=$cur"
-        if ($cur -eq 'WinUSB') { Log '  already WinUSB'; continue }
+    foreach ($n in (Get-QualcommNodes)) {
+        $svc = Get-NodeService $n.InstanceId
+        Log "node $($n.InstanceId) service=$svc"
+        if ($svc -eq 'WinUSB') { Log '  already WinUSB'; continue }
 
-        # Preferred: ask PnP to rebind the node to the WinUSB package.
-        foreach ($pkg in $inf) {
-            Log "  trying $pkg"
-            $out = & pnputil /add-driver "$env:SystemRoot\INF\$pkg" /install 2>&1
-            Log ("  " + (($out -join ' ').Trim()))
+        $hwid = ($n.InstanceId -split '\\')[1]   # e.g. USB\VID_05C6&PID_900E
+        $ok = $false
+        foreach ($pkg in $infNames) {
+            $infPath = Join-Path $env:SystemRoot "INF\$($pkg.Published)"
+            if (-not (Test-Path $infPath)) { Log "  $infPath missing"; continue }
+            Log "  forcing $($pkg.Published) on $hwid"
+            $reboot = $false
+            $res = [NewDevApi]::UpdateDriverForPlugAndPlayDevicesW(
+                [IntPtr]::Zero, $hwid, $infPath,
+                ($INSTALLFLAG_FORCE -bor $INSTALLFLAG_NONINTERACTIVE), [ref]$reboot)
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            Log ("  result={0} reboot={1} win32err={2}" -f $res, $reboot, $err)
+            if ($res) { $ok = $true; break }
         }
-        # Force on the live instance; this is the route that worked before
-        # (docs/07 F4: the COM packages outrank the libwdi ones, so a plain
-        # rescan is not enough).
-        $hwid = ($n.InstanceId -split '\\')[1]
-        Log "  DiInstallDevice on $hwid"
-        try {
-            $out = & pnputil /force 2>&1
-            Log ("  " + (($out -join ' ').Trim()))
-        } catch { Log "  pnputil /force unavailable: $($_.Exception.Message)" }
-
-        Log '  removing and rescanning the node'
-        try {
-            & pnputil /remove-device "$($n.InstanceId)" 2>&1 | ForEach-Object { Log "  $_" }
-        } catch { Log "  remove-device failed: $($_.Exception.Message)" }
-        Start-Sleep -Milliseconds 800
-        & pnputil /scan-devices 2>&1 | ForEach-Object { Log "  $_" }
-        Start-Sleep -Milliseconds 1200
+        if (-not $ok) {
+            Log '  forcing failed - deleting the competing Qualcomm package and retrying'
+            foreach ($q in (Find-DriverInf -ProviderPattern 'Qualcomm' -PidPattern '900E')) {
+                Log "  pnputil /delete-driver $($q.Published) /uninstall /force"
+                & pnputil /delete-driver $q.Published /uninstall /force 2>&1 |
+                    ForEach-Object { Log "    $_" }
+            }
+            & pnputil /scan-devices 2>&1 | ForEach-Object { Log "    $_" }
+            Start-Sleep -Milliseconds 1500
+        }
     }
 
     Log ''
     Show-State
-    Log 'If the service above is still qcwdfserial, the COM package still wins:'
-    Log 'delete the competing oem*.inf and repeat, or bind WinUSB with Zadig once.'
+    $svc = (Get-QualcommNodes | ForEach-Object { Get-NodeService $_.InstanceId }) -join ','
+    if ($svc -eq 'WinUSB') {
+        Log 'SUCCESS: node is on WinUSB. Power cycle the tablet, then run the libusb catcher.'
+    } else {
+        Log 'STILL on a non-WinUSB service. Bind it once with Zadig (Options > List All Devices,'
+        Log 'select 05C6:900E, choose WinUSB) - that is a one-time click and fully reversible.'
+    }
     exit 0
 }
 
 if ($To -eq 'COM') {
-    Log 'target: Qualcomm COM driver (qcwdfserial) - needed by QSaharaServer/fh_loader'
-
-    # Find a Qualcomm serial INF in the driver store.
-    $q = & pnputil /enum-drivers 2>&1
-    $blocks = ($q -join "`n") -split "`r?`n`r?`n"
-    $inf = @()
-    foreach ($b in $blocks) {
-        if ($b -match 'qc\w*ser' -and $b -match '(oem\d+\.inf)') {
-            $inf += [regex]::Match($b, '(oem\d+\.inf)').Groups[1].Value
-        }
+    Log 'target: Qualcomm COM driver (for QSaharaServer / fh_loader / QFIL)'
+    $removed = 0
+    foreach ($h in (Find-DriverInf -ProviderPattern 'libwdi' -PidPattern '900E|9008')) {
+        Log "deleting $($h.Published)"
+        & pnputil /delete-driver $h.Published /uninstall /force 2>&1 |
+            ForEach-Object { Log "  $_" }
+        $removed++
     }
-    $inf = $inf | Select-Object -Unique
-    if (-not $inf) {
-        Log 'ERROR: no Qualcomm serial package found. Install the Qualcomm USB drivers.'
-        exit 1
-    }
-    Log ("Qualcomm packages: " + ($inf -join ', '))
-
-    foreach ($n in (Get-PnpDevice -PresentOnly | Where-Object {
-                $_.InstanceId -match 'VID_05C6' })) {
-        Log "rebinding $($n.InstanceId)"
-        try {
-            & pnputil /remove-device "$($n.InstanceId)" 2>&1 | ForEach-Object { Log "  $_" }
-        } catch { Log "  remove-device failed: $($_.Exception.Message)" }
-        Start-Sleep -Milliseconds 800
-        & pnputil /scan-devices 2>&1 | ForEach-Object { Log "  $_" }
-        Start-Sleep -Milliseconds 1200
-    }
-
+    if ($removed -eq 0) { Log 'no libwdi packages to remove' }
+    & pnputil /scan-devices 2>&1 | ForEach-Object { Log "  $_" }
+    Start-Sleep -Milliseconds 2000
     Log ''
     Show-State
     exit 0
