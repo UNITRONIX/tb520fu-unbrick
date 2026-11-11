@@ -29,3 +29,8 @@
 {"when": "2026-11-11 13:57:59", "event": "status", "pids": {"USB\\VID_05C6&PID_900E\\B6F2DE0A": "900E"}, "com": "COM10"}
 {"when": "2026-11-11 14:01:58", "event": "status", "pids": {}, "com": null}
 {"when": "2026-11-11 14:03:15", "event": "watch", "events": 2, "seconds": 300.0}
+{"when": "2026-11-11 14:03:32", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:03:43", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:04:51", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:05:02", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:05:12", "event": "status", "pids": {}, "com": null}
