@@ -1,0 +1,49 @@
+---
+description: tb520fu-unbrick hard rules - no output truncation, no unjustified waits
+globs:
+  - "scripts/**"
+  - "**/*.ps1"
+  - "**/*.py"
+alwaysApply: true
+---
+
+# Rules for this repository
+
+## NEVER truncate live script output
+
+Do **not** pipe a running script into anything that can close the pipe early:
+
+- `| Select-Object -First N`
+- `| Select -First N`
+- `| head -n N`
+- `| tail -n N`
+
+These kill the upstream process mid-run, and on this project that means killing a
+tool while it holds the tablet's COM port — which wedges the node and looks
+exactly like a device failure.
+
+Correct: let the process finish, redirect everything to a file, then read the
+file.
+
+```powershell
+python script.py *> run.log
+Get-Content run.log -Tail 40      # only after the process has exited
+```
+
+## NEVER wait for a fixed long time
+
+No `Start-Sleep` for tens of seconds and no multi-minute timeouts "to be safe".
+Wait only for a specific measured event, bound the wait by that event, and report
+a negative result immediately when it does not arrive.
+
+Prefer polling for the result at a short interval over blocking on a timer.
+
+## Other standing rules
+
+- A device test must not be recorded as a device finding until the measuring tool
+  is proven working (control read or a second implementation).
+- Never send `SAHARA_RESET_STATE_MACHINE` (`0x13`). Use `SAHARA_RESET` (`0x07`).
+- Do not mix the WinUSB and Qualcomm-COM driver worlds in one session.
+- Read `docs/07-dead-ends.md` before proposing a new approach.
+
+Full detail: `docs/32-session-conventions.md`.
