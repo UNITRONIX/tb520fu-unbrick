@@ -34,6 +34,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from ab_test import classify, tablet_nodes, usb_nodes  # noqa: E402
+import tablet as T  # noqa: E402  - the one place that knows how to read a HELLO
 
 OUT = HERE / "short_attempt.json"
 
@@ -43,27 +44,17 @@ def log(m: str = "") -> None:
 
 
 def read_port() -> str:
-    import serial.tools.list_ports
-    cands = [p.device for p in serial.tools.list_ports.comports()
-             if "05C6" in (p.hwid or "").upper()
-             or "QUALCOMM" in (p.description or "").upper()]
-    if not cands:
-        return "no Qualcomm COM port"
-    try:
-        import serial
-        with serial.Serial(cands[0], 115200, timeout=0.3) as s:
-            data = s.read(64)
-    except Exception as err:  # noqa: BLE001
-        return f"{cands[0]} unopenable ({type(err).__name__})"
-    if not data:
-        return f"{cands[0]} open, no bytes"
-    if len(data) >= 8:
-        cmd, ln = struct.unpack_from("<II", data, 0)
-        if cmd == 0x01 and len(data) >= 0x30:
-            ver = struct.unpack_from("<I", data, 8)[0]
-            mode = struct.unpack_from("<I", data, 20)[0]
-            return f"*** HELLO ver={ver} mode={mode} ***"
-    return f"{len(data)} bytes"
+    """Read the HELLO if a Qualcomm COM port exists, and CAPTURE it.
+
+    Delegates to tablet.grab_edl_hello rather than doing its own 64-byte read.
+    Two reasons, both learned the hard way in this project:
+
+      * a bare `read(64)` is not a packet - a Sahara HELLO is 0x30 bytes and a partial
+        read makes the version/mode fields look wrong;
+      * the capture is written to disk by tablet.save_hello_capture, which is the only
+        way this measurement survives the session (docs/97, docs/102).
+    """
+    return T.grab_any_hello(8.0)
 
 
 def run(orientation: str, seconds: float) -> int:
@@ -116,16 +107,18 @@ def run(orientation: str, seconds: float) -> int:
     time.sleep(1.5)
     final = tablet_nodes()
     verdict = classify(final)
-    port = read_port()
+    rc = read_port()
+    port = f"exit={rc}" if rc in (0, 1) else rc
+    hello = "see log above (raw packet saved to hello_captures/ if read)"
     log("")
     log(f"  VERDICT ({orientation.upper()}) : {verdict}")
-    log(f"  port                    : {port}")
+    log(f"  HELLO read              : {port}")
 
     rec = json.loads(OUT.read_text()) if OUT.exists() else {}
     rec.setdefault(orientation.upper(), {})
     rec[orientation.upper()]["when"] = time.strftime("%Y-%m-%d %H:%M:%S")
     rec[orientation.upper()]["verdict"] = verdict
-    rec[orientation.upper()]["port"] = port
+    rec[orientation.upper()]["hello_exit"] = rc
     rec[orientation.upper()]["nodes"] = final
     OUT.write_text(json.dumps(rec, indent=2))
     log(f"  saved to {OUT}")
@@ -133,8 +126,13 @@ def run(orientation: str, seconds: float) -> int:
     if verdict == "EDL-9008":
         log("")
         log("  *** 9008 REACHED - this is the state the goal asks for. ***")
-        log("  Next: python tablet.py selftest   (reads the HELLO)")
-        return 0
+        if rc == 0:
+            log("  *** and the HELLO came back ver=3 mode=0: THE GOAL IS MET ***")
+            return 0
+        log("  But `hello_exit=1`: the node exists and the HELLO was not obtainable")
+        log("  (already spent, or WinUSB owns the node instead of a COM port).")
+        log("  Switch the driver and repeat: Switch-DeviceDriver.ps1 -To COM (elevated)")
+        return 1
     if verdict == "crashdump-900E":
         log("")
         log("  Still 900E: the short was not seen in this orientation.")
@@ -160,7 +158,7 @@ def summary() -> int:
     log("=" * 74)
     for o in ("A", "B"):
         if o in rec:
-            log(f"  orientation {o}: {rec[o]['verdict']:<20} {rec[o]['port']}")
+            log(f"  orientation {o}: {rec[o]['verdict']:<20} hello_exit={rec[o].get('hello_exit')}")
         else:
             log(f"  orientation {o}: not tried")
     log("")

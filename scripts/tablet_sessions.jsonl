@@ -38,3 +38,5 @@
 {"when": "2026-11-11 14:42:42", "event": "status", "pids": {}, "com": null}
 {"when": "2026-11-11 14:49:28", "event": "catch", "ok": false, "reason": "no-port"}
 {"when": "2026-11-11 14:49:29", "event": "edl_hello", "ok": false, "reason": "no-9008"}
+{"when": "2026-11-11 14:49:40", "event": "status", "pids": {}, "com": null}
+{"when": "2026-11-11 14:50:51", "event": "edl_hello", "ok": false, "reason": "no-9008"}

@@ -723,6 +723,60 @@ def cmd_bump(args) -> int:
             grab_edl_hello(args.edl_timeout)
 
 
+def grab_any_hello(timeout: float) -> int:
+    """Read the HELLO off whichever Qualcomm COM port exists, and capture it.
+
+    Needed because the two routes land in different modes: a bump produces 9008, but a
+    D+ short can produce either 900E (short not seen) or 9008 (seen). The D+ attempt
+    still has to READ the HELLO in the 900E case, because a fresh mode=2 HELLO is what
+    makes a bump possible afterwards - and if this reader does not take it, some other
+    process will (docs/34).
+    """
+    t0 = time.time()
+    deadline = t0 + timeout
+    cp = None
+    while time.time() < deadline:
+        cp = com_port()
+        if cp:
+            break
+        time.sleep(0.005)
+    if not cp:
+        log(f"  no Qualcomm COM port within {timeout:.0f}s")
+        return 1
+    log(f"  port {cp} after {time.time() - t0:.1f}s - opening immediately")
+
+    link = None
+    while time.time() < deadline:
+        try:
+            link = Link(cp)
+            break
+        except Exception:  # noqa: BLE001
+            time.sleep(0.002)
+    if link is None:
+        log(f"  could not open {cp}")
+        return 1
+    try:
+        pkt = link.packet(4.0)
+        if pkt is None:
+            log("  port open, no HELLO - already consumed")
+            return 1
+        cmd = struct.unpack_from("<I", pkt, 0)[0]
+        if cmd != CMD_HELLO_REQ:
+            log(f"  expected HELLO, got {NAMES.get(cmd, hex(cmd))}")
+            return 1
+        ver = struct.unpack_from("<I", pkt, 8)[0]
+        mode = struct.unpack_from("<I", pkt, 20)[0]
+        log(f"  *** HELLO ver={ver} mode={mode} on {cp} ***")
+        save_hello_capture(pkt, "short-attempt")
+        if ver == 3 and mode == MODE_IMAGE_TX:
+            log("  *** GOAL STATE: HELLO ver=3 mode=0 straight from PBL ***")
+            return 0
+        log("  not the goal state (ver=3 mode=0 would be)")
+        return 1
+    finally:
+        link.close()
+
+
 def cmd_edl_hello(args) -> int:
     """Read the HELLO off a 9008 node that is already present."""
     return grab_edl_hello(args.timeout)
