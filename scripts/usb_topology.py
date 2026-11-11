@@ -197,9 +197,13 @@ def report(iid: str, table) -> int:
     if not intermediates:
         print("  depth: 0 - DIRECT root-hub port (the configuration that worked in docs/98)")
         return 0
-    print(f"  depth: {len(intermediates)} intermediate hub(s) - "
-          f"docs/94 and docs/98 say this is where the tablet wedges")
-    return 1
+    print(f"  depth: {len(intermediates)} intermediate hub(s)")
+    # docs/99 retired the hub theory: this particular hub has produced 9008 and a COM
+    # port twice, so topology is reported as context and not as a verdict. Leaving the
+    # old "this is where the tablet wedges" line here made every run of this tool
+    # repeat a claim the registry had already disproved.
+    print("  (context only - docs/99: a hub is not what blocks 9008 on this device)")
+    return 0
 
 
 def main() -> int:
