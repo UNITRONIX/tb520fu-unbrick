@@ -101,6 +101,7 @@ anything older:
 | a hub is what wedges the tablet | `99-volplus-wedges-again-and-the-hub-never-blocked-9008.md` | this hub+port produced `9008`/COM9 twice; the wedge is the 4-retry budget expiring |
 | holding a volume key helps entry | `99` | Vol+ held at insertion is 0 for 2, and both attempts wedged |
 | `bump` then `wait --want 9008` reaches EDL | `100-the-two-process-bump-could-never-work.md` | a second process has no HELLO to read; the switch must happen on the handle that holds it |
+| the wedged node cannot be inspected from the host | `101-the-hub-port-is-readable-and-may-be-cyclable.md` | its hub port reads `DeviceEnumerated` with a null descriptor, and can be cycled |
 
 ## Conventions used in these documents
 
