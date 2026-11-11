@@ -104,6 +104,7 @@ anything older:
 | the wedged node cannot be inspected from the host | `101-the-hub-port-is-readable-and-may-be-cyclable.md` | its hub port reads `DeviceEnumerated` with a null descriptor, and can be cycled |
 | a hub-port cycle can clear the wedge | `102-what-the-hub-can-and-cannot-do.md` | `CYCLE_PORT` needs a USB 3.0 hub (this one is 2.0); `RESET_HUB` is accepted and does nothing |
 | nothing host-side can clear the wedge | `103-host-side-unwedge-routes-all-but-one-closed.md` | hub routes are closed; **devnode remove + rescan is untested** (`pnputil` needs elevation, `Remove-WedgedNode.ps1` does it) |
+| a driver binding applies to the device | `105-driver-binding-is-per-port.md` | it applies per SOCKET; only 2 of 11 tablet instances can expose a COM port |
 | the goal only needs one success | `104-the-repeatability-ledger.md` | the goal says *repeatable*; `attempts.py` counts attempts and refuses an unbacked success |
 
 ## Conventions used in these documents
