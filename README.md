@@ -243,10 +243,10 @@ the service centre.
 ```
 README.md                     you are here
 docs/
-  README.md                   index and reading order
+  README.md                   index, reading order by intent, and a table of corrections
   00-glossary.md              every acronym, explained
   01-timeline.md              what happened, in order
-  02-device-and-partitions.md partition table, slots, ABL facts
+  02-device-and-partitions.md partition table, slots, ABL offsets
   03-sahara-protocol.md       the protocol, as measured on this device
   04-melf-format.md           the five-image container, dissected
   05-firehose-and-the-silence.md   the wall
@@ -258,8 +258,43 @@ docs/
   11-faq.md                   short answers to the obvious questions
   12-bootloader-unlock.md     unlock file over HTTP: endpoint, contents, caveats
   13-hardware-and-drivers.md  silicon, kernel modules, firmware, rooting procedure
-  14-edl-mode-switch.md       the 900E → 9008 transition: sequence, variants, pitfalls
-  15-crashdump-memory-access.md  what 900E will read for you, and the DDR training log
+  14-edl-mode-switch.md       the 900E -> 9008 transition: sequence, variants, pitfalls
+  15-crashdump-memory-access.md  what 900E will read for you
+  16-firehose-bringup.md      the DDR pipeline, and the bypass that exists
+  17-write-gate.md            the lock is a byte, not a fuse, and it fails open
+  18-escalation-surfaces.md   every remaining lead, ranked
+  19-battery-gate.md          the DBC gate runs in XBL, before Firehose
+  20-entry-point-spin.md      the programmer's entry stub does not check its result
+  21..23                      live state, and two corrections about cycling
+  24..25                      Lenovo's COM toolchain, and that it works
+  26..31                      the DDR wall, what the dump contains, why the order blocked a read
+  32-session-conventions.md   the rules: no output truncation, no unjustified waits
+  33..36                      DDR_DATA reachable; HELLO is first-opener-wins; DRAM is not at fault
+  37-branch-sense-correction.md   an inverted branch annotation, fixed
+  38-mode-acquisition-procedures.md  the frozen procedures: 900E, 9008, FEDL
+  39..41                      FEDL decoded: entry point, condition, one bit
+  42-three-routes-ranked.md   and what blocks each
+  43-vendor-entry-procedure.md    Lenovo's own card: power off, hold Vol Up, plug in
+  44..46                      the PMIC dump, the live device tree, the 40 MiB boundary named
+  47-keys-are-on-three-controllers.md  Vol Up needs a driver; Power and Vol Down are PON
+  48..50                      the forced-download timeout, its 5 s settle, the handler
+  51..55                      PON log, baud sweep, CD_STRCT is code, the snapshot table
+  56..58                      two boot logs from the device; EDL was entered once
+  59..62                      the dload counter, the three gates, gate 1, and why the counter cannot be read
+  63..64                      the live memory map; CD_BTDDR is code not data
+  65..66                      the download cookie in uefiplat.cfg; what triggers it
+  67..68                      the captured boot ran ROCKNIX; EDL does not need UEFI
+  69..71                      the request is bit 12; nothing readable sets it
+  72-remaining-images-are-empty-or-encrypted.md
+  73-session-consolidation.md  READ THIS FIRST if you are new
+  74..80                      EUD: declared, checked before the D+ poll, and unreachable
+  81-external-confirmation-of-the-d-plus-short.md
+  82-sibling-recovered-and-firehose-works-on-this-model.md  the external proof
+  83..86                      same partition layout; the untested key pair; the attempt and its A/B
+  87-current-blocker-needs-a-physical-action.md   what is left, and what a PC cannot do
+  88-the-battery-disconnect-procedure.md          the step never performed
+  89-wedged-node-is-the-tablet.md
+  90-official-service-manual-found.md             Lenovo's SOP and tool list
 session-notes/                raw translated session logs, unedited
 scripts/                      the tooling, in English, path-parameterised
 ```
