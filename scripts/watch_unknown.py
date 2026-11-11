@@ -199,10 +199,19 @@ def main() -> int:
         print("  -> STATIC. Nothing arrived, re-arrived or left. The node sat in the failed")
         print("     state for the whole window: the device stopped answering at the")
         print("     descriptor stage and is not retrying. Only power removal clears it.")
+    elif len(re) == 1 and len(gone) == 1:
+        # One departure and one arrival is what a human replugging the cable looks like.
+        # Calling that "ACTIVE" overstates it - the earlier wording did exactly that and
+        # made a deliberate replug read as the device retrying on its own.
+        print("  -> ONE CYCLE. The node left once and came back once. That is the shape of a")
+        print("     manual replug, not a retry loop: a device retrying on its own produces")
+        print("     repeated arrivals WITHOUT anyone touching the cable. Count alone cannot")
+        print(f"     tell them apart - if nobody replugged, {len(re)} cycle is suspicious and")
+        print("     worth re-running.")
     else:
-        print(f"  -> ACTIVE. {len(re)} arrival(s), {len(gone)} departure(s) in the window.")
-        print("     The device is reaching USB address assignment and then failing (or")
-        print("     succeeding as something new). That is a live bus, not a dead node.")
+        print(f"  -> ACTIVE. {len(re)} arrival(s), {len(gone)} departure(s) in the window -")
+        print("     more than a single replug. The device is cycling on its own: it reaches")
+        print("     USB address assignment and then fails (or succeeds as something new).")
     return 0
 
 
