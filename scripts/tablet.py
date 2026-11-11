@@ -258,6 +258,132 @@ def hello_rsp(ver: int, mode: int) -> bytes:
                        ver, 1, 0, mode, 1, 2, 3, 4, 5, 6)
 
 
+def switch_to_edl(link: Link, ver: int) -> bool:
+    """Turn a LIVE mode=2 session into IMAGE_TX, on the handle that holds it.
+
+    This exists as its own function because of a dead end that cost a whole
+    afternoon: `catch` read the HELLO, printed "run `bump` now", and `bump` could
+    never work - it opens a new handle, and the HELLO is consumed by the first
+    opener (docs/34). The switch has to happen on the same session, so the code
+    that reads the HELLO is the code that must do the switching.
+
+    Wire bytes are the ones with log evidence (docs/14 V1/V1b): HELLO_RSP mode=3,
+    SWITCH_MODE with declared len=12, HELLO_RSP mode=0, then DONE.
+    """
+    link.write(hello_rsp(ver, MODE_COMMAND))
+    r = link.packet(4.0)
+    if r is None or struct.unpack_from("<I", r, 0)[0] != CMD_CMD_READY:
+        log("  COMMAND mode refused")
+        return False
+    log("  CMD_READY")
+
+    link.write(struct.pack("<III", CMD_SWITCH_MODE, 12, MODE_IMAGE_TX))
+    r = link.packet(5.0)
+    if r is None or struct.unpack_from("<I", r, 0)[0] != CMD_HELLO_REQ:
+        log("  switch not confirmed by a fresh HELLO")
+        return False
+    log("  fresh HELLO after switch - confirming")
+
+    link.write(hello_rsp(struct.unpack_from("<I", r, 8)[0], MODE_IMAGE_TX))
+    r = link.packet(5.0)
+    if r is not None and struct.unpack_from("<I", r, 0)[0] == CMD_END_TRANSFER:
+        st = struct.unpack_from("<I", r, 12)[0] if len(r) >= 16 else -1
+        log(f"  END status={st:#x} - sending DONE")
+        link.write(struct.pack("<II", CMD_DONE_REQ, 8))
+        link.packet(3.0)
+    return True
+
+
+def port_9008() -> str | None:
+    """The COM port of a 9008 node, found without spawning a process.
+
+    Speed matters here: the HELLO on 9008 is taken by whoever opens first, and a
+    PowerShell round-trip per poll costs ~400 ms - longer than the whole window.
+    list_ports reads the registry directly and returns in single-digit ms.
+    """
+    try:
+        for p in serial.tools.list_ports.comports():
+            hwid = (p.hwid or "").upper()
+            desc = (p.description or "").upper()
+            if "9008" in hwid or "QDLOADER" in desc:
+                return p.device.upper()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def grab_edl_hello(timeout: float) -> int:
+    """Wait for the 9008 node, then be the first reader of its HELLO.
+
+    Re-enumeration after a switch takes ~21 s (docs/14), so a 2-3 s wait reads as
+    failure while the switch is still in progress. Once the port exists there is
+    no second chance: the read has to be immediate, which is why this polls the
+    port list rather than the PID table.
+
+    A 9008 node with no COM port is the other failure mode, and it must be named
+    rather than silently timed out: if WinUSB (libwdi `oem67.inf`) owns the node
+    there is no COM port to open at all, and the fix is a driver switch
+    (`Switch-DeviceDriver.ps1 -To COM`), not a longer wait.
+    """
+    log("  waiting for 9008 (re-enumeration takes ~21 s; docs/14)")
+    t0 = time.time()
+    deadline = t0 + timeout
+    cp = None
+    node_seen = False
+    while time.time() < deadline:
+        cp = port_9008()
+        if cp:
+            break
+        if not node_seen and "9008" in pids_present().values():
+            node_seen = True
+            log("  9008 node IS on the bus but has no COM port")
+            log("  -> WinUSB owns it; run Switch-DeviceDriver.ps1 -To COM (elevated)")
+            log("     without a port the HELLO is unreachable from here")
+        time.sleep(0.005)
+    if not cp:
+        log(f"  9008 never appeared within {timeout:.0f}s")
+        record("edl_hello", ok=False,
+               reason="no-port" if node_seen else "no-9008")
+        return 1
+
+    log(f"  9008 port {cp} after {time.time() - t0:.1f}s - opening immediately")
+    link = None
+    while time.time() < deadline:
+        try:
+            link = Link(cp)
+            break
+        except Exception:  # noqa: BLE001
+            time.sleep(0.002)
+    if link is None:
+        log(f"  could not open {cp}")
+        record("edl_hello", ok=False, reason="no-open", port=cp)
+        return 1
+
+    try:
+        pkt = link.packet(4.0)
+        if pkt is None:
+            log("  port open, no HELLO - it was already consumed")
+            record("edl_hello", ok=False, reason="no-hello", port=cp)
+            return 1
+        cmd = struct.unpack_from("<I", pkt, 0)[0]
+        if cmd != CMD_HELLO_REQ:
+            log(f"  expected HELLO, got {NAMES.get(cmd, hex(cmd))}")
+            record("edl_hello", ok=False, reason=f"packet-{cmd:#x}", port=cp)
+            return 1
+        ver = struct.unpack_from("<I", pkt, 8)[0]
+        mode = struct.unpack_from("<I", pkt, 20)[0]
+        log(f"  *** HELLO ver={ver} mode={mode} on {cp} ***")
+        record("edl_hello", ok=(ver == 3 and mode == MODE_IMAGE_TX),
+               ver=ver, mode=mode, port=cp)
+        if ver == 3 and mode == MODE_IMAGE_TX:
+            log("  *** GOAL STATE: HELLO ver=3 mode=0 straight from PBL ***")
+            return 0
+        log("  not the goal state - ver=3 mode=0 is what EDL from PBL looks like")
+        return 1
+    finally:
+        link.close()          # never a reset - see Link.close()
+
+
 def parse_table(payload: bytes) -> list[dict]:
     out = []
     for off in range(0, len(payload) - 63, 64):
@@ -421,12 +547,23 @@ def cmd_read(args) -> int:
 
 
 def cmd_bump(args) -> int:
-    """900E -> 9008. Requires being the first reader of the HELLO."""
+    """900E -> 9008, and then take the 9008 HELLO in the same run.
+
+    The switch alone is not the goal: after it the device re-enumerates as 9008 and
+    emits a ver=3 mode=0 HELLO that the first opener takes (docs/34). Doing the
+    switch in one process and reading in another loses it every time, so the read
+    is chained here unless --no-grab is given.
+
+    The old version printed "switch complete" and returned - and its own advice,
+    "now run bump again", could never work, because bump opens a NEW handle and the
+    HELLO it wants is already in the closed one.
+    """
     link = open_900e(args.port)
     if link is None:
         return 1
     log(f"  opened {link.port}")
     ok = False
+    grab = False
     try:
         pkt = link.packet(5.0)
         if pkt is None:
@@ -442,41 +579,34 @@ def cmd_bump(args) -> int:
         mode = struct.unpack_from("<I", pkt, 20)[0]
         log(f"  HELLO ver={ver} mode={mode}")
         if mode == MODE_IMAGE_TX:
-            log("  already IMAGE_TX; nothing to switch")
+            log("  already IMAGE_TX - this session IS the EDL state")
+            record("bump", ok=True, ver=ver, mode=mode, already=True)
             ok = True
+            if ver == 3:
+                log("  *** GOAL STATE: HELLO ver=3 mode=0 straight from PBL ***")
             return 0
 
-        link.write(hello_rsp(ver, MODE_COMMAND))
-        r = link.packet(4.0)
-        if r is None or struct.unpack_from("<I", r, 0)[0] != CMD_CMD_READY:
-            log("  COMMAND mode refused")
-            record("bump", ok=False, reason="no-cmd-ready")
-            return 1
-        log("  CMD_READY")
-
-        link.write(struct.pack("<III", CMD_SWITCH_MODE, 12, MODE_IMAGE_TX))
-        r = link.packet(5.0)
-        if r is None or struct.unpack_from("<I", r, 0)[0] != CMD_HELLO_REQ:
-            log("  switch not confirmed by a fresh HELLO")
+        if not switch_to_edl(link, ver):
             record("bump", ok=False, reason="switch-refused")
             return 1
-        log("  fresh HELLO after switch - confirming")
-
-        link.write(hello_rsp(struct.unpack_from("<I", r, 8)[0], MODE_IMAGE_TX))
-        r = link.packet(5.0)
-        if r is not None and struct.unpack_from("<I", r, 0)[0] == CMD_END_TRANSFER:
-            st = struct.unpack_from("<I", r, 12)[0] if len(r) >= 16 else -1
-            log(f"  END status={st:#x} - sending DONE")
-            link.write(struct.pack("<II", CMD_DONE_REQ, 8))
-            link.packet(3.0)
-        log("  switch complete; 9008 should enumerate in ~20 s")
-        ok = True
+        log("  switch complete")
         record("bump", ok=True)
+        ok = True
+        grab = not args.no_grab
         return 0
     finally:
         link.close()
         if not ok:
             log("  NOTE: the port was closed without a reset on purpose (docs/34)")
+        if grab:
+            # Close the 900E handle before waiting, then race to be the first
+            # opener on the 9008 node - that read is the whole point.
+            grab_edl_hello(args.edl_timeout)
+
+
+def cmd_edl_hello(args) -> int:
+    """Read the HELLO off a 9008 node that is already present."""
+    return grab_edl_hello(args.timeout)
 
 
 def cmd_catch(args) -> int:
@@ -514,6 +644,8 @@ def cmd_catch(args) -> int:
     deadline = time.time() + args.seconds
     deaths = 0
     link = None
+    grab = False
+    rc = 1
     try:
         while time.time() < deadline:
             if link is None:
@@ -547,10 +679,34 @@ def cmd_catch(args) -> int:
             log(f"  *** HELLO ver={ver} mode={mode} ***")
             record("catch", ok=True, ver=ver, mode=mode, deaths=deaths)
             if mode == MODE_MEMORY_DEBUG:
-                log("  crashdump HELLO. Run `bump` now, or `read` for memory.")
-            elif mode == MODE_IMAGE_TX:
-                log("  IMAGE_TX - this is already the EDL state the goal wants.")
-            return 0
+                # CORRECTION to what this used to print: "run `bump` now" could
+                # never work. bump opens its own handle, and the HELLO is spent the
+                # moment this one read it (docs/34). The switch has to happen here,
+                # on this handle, or not at all.
+                if args.no_bump:
+                    log("  crashdump HELLO - re-run without --no-bump to switch on this handle")
+                    rc = 0
+                else:
+                    log("  crashdump HELLO - switching on THIS handle (a second process cannot)")
+                    if switch_to_edl(link, ver):
+                        log("  switch complete")
+                        record("bump", ok=True, source="catch")
+                        grab = True
+                        rc = 0
+                    else:
+                        record("bump", ok=False, source="catch", reason="switch-refused")
+                        rc = 1
+                return rc
+            if mode == MODE_IMAGE_TX:
+                if ver == 3:
+                    log("  *** GOAL STATE: HELLO ver=3 mode=0 straight from PBL ***")
+                    rc = 0
+                else:
+                    log("  IMAGE_TX but ver!=3 - not the PBL EDL state")
+                    rc = 1
+                return rc
+            rc = 0
+            return rc
 
         log(f"  {args.seconds:.0f}s elapsed with no HELLO")
         record("catch", ok=False, reason="timeout", deaths=deaths)
@@ -558,6 +714,10 @@ def cmd_catch(args) -> int:
     finally:
         if link:
             link.close()          # never a reset - see Link.close()
+        if grab:
+            # The 900E port is closed now; race for the 9008 node's HELLO, which is
+            # only emitted once and only while nobody has opened it.
+            grab_edl_hello(args.edl_timeout)
 
 
 def cmd_watch(args) -> int:
@@ -789,8 +949,12 @@ def main() -> int:
     s.add_argument("--hello-timeout", type=float, default=8.0)
     s.set_defaults(fn=cmd_read)
 
-    s = sub.add_parser("bump", help="900E -> 9008 (needs a fresh HELLO)")
+    s = sub.add_parser("bump", help="900E -> 9008 and take the 9008 HELLO in the same run")
     s.add_argument("--port", default=None)
+    s.add_argument("--no-grab", action="store_true",
+                   help="switch only, do not chase the 9008 HELLO afterwards")
+    s.add_argument("--edl-timeout", type=float, default=45.0,
+                   help="how long to wait for the 9008 node (re-enumeration ~21 s)")
     s.set_defaults(fn=cmd_bump)
 
     s = sub.add_parser("selftest", help="verify the toolchain, change nothing")
@@ -799,7 +963,14 @@ def main() -> int:
     s = sub.add_parser("catch", help="hold a handle across a power cycle and grab the HELLO")
     s.add_argument("--port", default=None)
     s.add_argument("--seconds", type=float, default=180)
+    s.add_argument("--no-bump", action="store_true",
+                   help="only report the HELLO, do not switch to EDL on the same handle")
+    s.add_argument("--edl-timeout", type=float, default=45.0)
     s.set_defaults(fn=cmd_catch)
+
+    s = sub.add_parser("edl-hello", help="wait for an existing 9008 node and read its HELLO")
+    s.add_argument("--timeout", type=float, default=45.0)
+    s.set_defaults(fn=cmd_edl_hello)
 
     s = sub.add_parser("watch", help="log every USB device appearing/disappearing, no VID filter")
     s.add_argument("--seconds", type=float, default=120)
