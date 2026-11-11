@@ -92,8 +92,37 @@ def log(m: str = "") -> None:
 
 
 def record(event: str, **kv) -> None:
-    """Append one line to the session log so a working procedure is reproducible."""
+    """Append one line to the session log, skipping a repeat of the previous state.
+
+    Why deduplicate: on 2026-11-11 the log accumulated nineteen consecutive
+    `status` entries with identical empty payloads, because the state did not change
+    and each check wrote a new line. That is the only history the next session will
+    read, and identical rows buried the few entries that mattered. A log where every
+    line is a *transition* is worth reading; one where every line is a *poll* is not.
+
+    Only the `status` event is deduplicated. Anything that represents an action or a
+    result (catch, read, bump, attempt) is always written, even if it repeats -
+    repetitions there are information.
+    """
     rec = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "event": event, **kv}
+
+    if event == "status" and LOG.exists():
+        try:
+            with LOG.open("r", encoding="utf-8") as f:
+                last = None
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        last = line
+            if last:
+                prev = json.loads(last)
+                if (prev.get("event") == "status"
+                        and prev.get("pids") == kv.get("pids")
+                        and prev.get("com") == kv.get("com")):
+                    return
+        except Exception:  # noqa: BLE001
+            pass   # a malformed log must never stop a tool from running
+
     with LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")
 
