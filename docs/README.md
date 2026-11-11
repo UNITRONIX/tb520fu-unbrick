@@ -4,9 +4,10 @@ This directory is organised so you can read only what you need.
 
 **If you are holding a bricked TB520FU right now, read in this order:**
 
-    1.  `73-session-consolidation.md`   - the current state in one page, and the one route left
-    2.  `87-current-blocker-needs-a-physical-action.md` - what to do next, and what is not possible from a PC
-    3.  `82-sibling-recovered-and-firehose-works-on-this-model.md` - proof the device is recoverable
+   1.  `73-session-consolidation.md`   - the current state in one page, and the one route left
+   2.  `87-current-blocker-needs-a-physical-action.md` - what to do next, and what is not possible from a PC
+   3.  `99-volplus-wedges-again-and-the-hub-never-blocked-9008.md` - the entry method that actually works: no keys
+   4.  `82-sibling-recovered-and-firehose-works-on-this-model.md` - proof the device is recoverable
     4.  `88-the-battery-disconnect-procedure.md` + `90-official-service-manual-found.md` - the documented recovery path
     5.  `07-dead-ends.md` - everything already tried, so you do not repeat it
 
@@ -97,6 +98,8 @@ anything older:
 | no `eud` node exists, so EUD is closed | `74-eud-node-does-exist.md` | it exists, `status = "okay"`, in the Android DTB |
 | the captured boot loaded stock UEFI | `67` then `68` | it loaded ROCKNIX; and EDL does not need UEFI at all |
 | the PMIC dump holds register state | `44` | it is a header plus a scattered log, 99.4 % zero |
+| a hub is what wedges the tablet | `99-volplus-wedges-again-and-the-hub-never-blocked-9008.md` | this hub+port produced `9008`/COM9 twice; the wedge is the 4-retry budget expiring |
+| holding a volume key helps entry | `99` | Vol+ held at insertion is 0 for 2, and both attempts wedged |
 
 ## Conventions used in these documents
 
