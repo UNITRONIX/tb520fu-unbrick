@@ -91,6 +91,55 @@ def log(m: str = "") -> None:
     print(f"[{time.time() - T0:7.3f}] {m}", flush=True)
 
 
+def save_hello_capture(pkt: bytes, source: str) -> str:
+    """Write the raw HELLO packet to disk, and say where.
+
+    Why this is not optional: docs/97 established that the founding measurement of
+    this whole project - `HELLO ver=3 mode=0` - has **no raw capture anywhere in the
+    repository**. It is supported by prose and by later measurements, and it cannot be
+    re-checked by anyone. That is the one defect in the evidence base that a single
+    line of code can prevent from recurring.
+
+    Captures go to `hello_captures/` with a timestamp, the source command, and the
+    parsed header, so a future reader can compare bytes rather than trust a summary.
+    """
+    try:
+        outdir = HERE / "hello_captures"
+        outdir.mkdir(exist_ok=True)
+        # Never let synthetic data land in the evidence folder. A unit test wrote a
+        # fabricated ver=3 mode=0 packet here once, and a folder named "captures" that
+        # can contain invented bytes is worse than no folder at all (docs/97 is about
+        # exactly this failure mode). Test artefacts are refused by name.
+        if source.startswith("unit") or source.startswith("test"):
+            log("  refusing to save a synthetic packet as a capture")
+            return ""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        raw_path = outdir / f"{stamp}-{source}.bin"
+        raw_path.write_bytes(pkt)
+
+        cmd, ln = struct.unpack_from("<II", pkt, 0)
+        ver = struct.unpack_from("<I", pkt, 8)[0] if len(pkt) >= 12 else None
+        mode = struct.unpack_from("<I", pkt, 20)[0] if len(pkt) >= 24 else None
+        meta = {
+            "when": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "source": source,
+            "cmd": cmd,
+            "cmd_name": NAMES.get(cmd, hex(cmd)),
+            "length": ln,
+            "version": ver,
+            "mode": mode,
+            "is_goal_state": (ver == 3 and mode == MODE_IMAGE_TX),
+            "bytes": len(pkt),
+            "port": None,
+        }
+        (outdir / f"{stamp}-{source}.json").write_text(json.dumps(meta, indent=2))
+        log(f"  raw HELLO saved: {raw_path.name} ({len(pkt)} B)")
+        return str(raw_path)
+    except Exception as err:  # noqa: BLE001
+        log(f"  could not save the HELLO capture: {type(err).__name__}")
+        return ""
+
+
 def record(event: str, **kv) -> None:
     """Append one line to the session log, skipping a repeat of the previous state.
 
@@ -442,6 +491,7 @@ def grab_edl_hello(timeout: float) -> int:
         ver = struct.unpack_from("<I", pkt, 8)[0]
         mode = struct.unpack_from("<I", pkt, 20)[0]
         log(f"  *** HELLO ver={ver} mode={mode} on {cp} ***")
+        save_hello_capture(pkt, "edl-9008")
         record("edl_hello", ok=(ver == 3 and mode == MODE_IMAGE_TX),
                ver=ver, mode=mode, port=cp)
         if ver == 3 and mode == MODE_IMAGE_TX:
@@ -753,6 +803,7 @@ def cmd_catch(args) -> int:
             ver = struct.unpack_from("<I", pkt, 8)[0]
             mode = struct.unpack_from("<I", pkt, 20)[0]
             log(f"  *** HELLO ver={ver} mode={mode} ***")
+            save_hello_capture(pkt, "catch")
             record("catch", ok=True, ver=ver, mode=mode, deaths=deaths)
             if mode == MODE_MEMORY_DEBUG:
                 # CORRECTION to what this used to print: "run `bump` now" could

@@ -102,6 +102,7 @@ anything older:
 | holding a volume key helps entry | `99` | Vol+ held at insertion is 0 for 2, and both attempts wedged |
 | `bump` then `wait --want 9008` reaches EDL | `100-the-two-process-bump-could-never-work.md` | a second process has no HELLO to read; the switch must happen on the handle that holds it |
 | the wedged node cannot be inspected from the host | `101-the-hub-port-is-readable-and-may-be-cyclable.md` | its hub port reads `DeviceEnumerated` with a null descriptor, and can be cycled |
+| a hub-port cycle can clear the wedge | `102-what-the-hub-can-and-cannot-do.md` | `CYCLE_PORT` needs a USB 3.0 hub (this one is 2.0); `RESET_HUB` is accepted and does nothing |
 
 ## Conventions used in these documents
 
