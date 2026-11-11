@@ -33,3 +33,5 @@
 {"when": "2026-11-11 14:41:37", "event": "offcheck", "away": 0, "verdict": "never-absent"}
 {"when": "2026-11-11 14:41:56", "event": "status", "pids": {}, "com": null}
 {"when": "2026-11-11 14:42:07", "event": "offcheck", "away": 0, "verdict": "never-absent"}
+{"when": "2026-11-11 14:42:17", "event": "catch", "ok": false, "reason": "no-port"}
+{"when": "2026-11-11 14:42:37", "event": "catch", "ok": false, "reason": "no-port"}

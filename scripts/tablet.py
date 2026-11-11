@@ -718,9 +718,16 @@ def cmd_catch(args) -> int:
     try:
         while time.time() < deadline:
             if link is None:
+                # Re-resolve the port on every reconnect. The COM number is assigned
+                # per instance and the fresh node after a power cycle is not
+                # guaranteed to land on the same one; holding the old name meant
+                # opening a device that no longer existed, for the whole window.
+                fresh = com_port(port)
+                if fresh:
+                    port = fresh
                 try:
                     link = Link(port)
-                    log(f"  handle open (death #{deaths})")
+                    log(f"  handle open (death #{deaths}) on {port}")
                 except Exception:  # noqa: BLE001
                     time.sleep(0.002)
                     continue
