@@ -316,15 +316,29 @@ def main() -> int:
     print(f"target: {why}")
     if args.hub:
         path = hub_path_for(args.hub)
-    elif parent:
-        path = hub_path_for(parent)
     else:
-        path = None
+        path = hub_path_for(parent) if parent else None
     print(f"  hub  : {path}")
     print(f"  port : {port}")
     if not path or not port:
         print("  need both a hub path and a port number")
         return 2
+
+    # Refuse to touch a port that has no device on it. A CYCLE_PORT on an empty port
+    # is harmless, but a script that will fire on "whatever is on port N" is one
+    # argument away from cycling a live disk. The port number is read separately from
+    # the hub path, so they can drift apart between runs.
+    if not args.dry_run and not args.info:
+        h, _ = open_hub(path)
+        if h:
+            try:
+                st = port_state(h, port)
+                if st is not None and st["status"] == 0:
+                    print("  port is EMPTY - refusing to act on it")
+                    print("  (the tablet may have moved; re-run with --port)")
+                    return 2
+            finally:
+                CloseHandleSafe(h)
 
     handle, err = open_hub(path)
     if not handle:
