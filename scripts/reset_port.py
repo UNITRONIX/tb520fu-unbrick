@@ -181,6 +181,11 @@ def open_hub(path: str):
     return h, 0
 
 
+def CloseHandleSafe(h) -> None:
+    if h and h != INVALID_HANDLE_VALUE:
+        kernel32.CloseHandle(h)
+
+
 def port_state(handle, port: int) -> dict | None:
     """One port's state, or None if the IOCTL was refused.
 
