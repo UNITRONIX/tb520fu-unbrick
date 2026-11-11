@@ -1,0 +1,12 @@
+{
+  "control": {
+    "when": "2026-11-11 14:28:12",
+    "before": [
+      "USB\\VID_05C6&PID_900E\\B6F2DE0A"
+    ],
+    "absent_s": null,
+    "final_nodes": [],
+    "verdict": "absent",
+    "hello": "no Qualcomm COM port"
+  }
+}

@@ -25,3 +25,4 @@
 {"when": "2026-11-11 14:09:31", "event": "status", "pids": {}, "com": null}
 {"when": "2026-11-11 14:24:39", "event": "status", "pids": {"USB\\VID_05C6&PID_900E\\B6F2DE0A": "900E"}, "com": "COM10"}
 {"when": "2026-11-11 14:24:45", "event": "selftest", "steps": [["VID_05C6 enumeration", true, "1 node(s)"], ["Qualcomm COM port present", true, "COM10"], ["port opens", true, "COM10"], ["bytes pending", false, "none (HELLO spent)"], ["memory table cached", false, "none yet"], ["programmer on disk", true, "1569028 B"]]}
+{"when": "2026-11-11 14:27:17", "event": "status", "pids": {}, "com": null}
