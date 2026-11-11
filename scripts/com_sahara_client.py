@@ -90,6 +90,12 @@ class SerialLink:
         self.ser = serial.Serial(port, baud, timeout=0.2, write_timeout=3.0)
         self.buf = b""
         self.timeout = timeout
+        # A dead port raises on every call forever. Without this counter the read
+        # loops spin and produce tens of thousands of identical log lines, which
+        # buries the actual result - the same class of harm as truncating output.
+        self.errors = 0
+        self.last_error = ""
+        self.dead = False
 
     def close(self) -> None:
         try:
@@ -98,24 +104,36 @@ class SerialLink:
             pass
 
     def _fill(self, want: int = 4096) -> bytes:
+        if self.dead:
+            return b""
         try:
-            return self.ser.read(max(1, want))
+            data = self.ser.read(max(1, want))
+            if data:
+                self.errors = 0
+            return data
         except Exception as err:  # noqa: BLE001
-            log(f"    read error: {type(err).__name__}: {err}")
+            self.errors += 1
+            self.last_error = f"{type(err).__name__}: {err}"
+            if self.errors == 1:
+                log(f"    port read error ({self.last_error})")
+            if self.errors >= 8:
+                self.dead = True
+                log("    port stopped responding - ending this session "
+                    "(a power cycle clears it; do not retry blindly)")
             return b""
 
     def read_packet(self, timeout: float | None = None):
         tmo = self.timeout if timeout is None else timeout
         deadline = time.time() + tmo
         while len(self.buf) < 8:
-            if time.time() > deadline:
+            if self.dead or time.time() > deadline:
                 return None
             self.buf += self._fill(64)
         cmd, ln = struct.unpack_from("<II", self.buf, 0)
         if ln < 8 or ln > (1 << 20):
             raise RuntimeError(f"insane packet length {ln} (cmd={cmd:#x}) - bad framing")
         while len(self.buf) < ln:
-            if time.time() > deadline:
+            if self.dead or time.time() > deadline:
                 return None
             self.buf += self._fill(4096)
         pkt, self.buf = self.buf[:ln], self.buf[ln:]
@@ -142,6 +160,8 @@ def mem_read(link: SerialLink, addr: int, length: int, tmo: float = 20.0) -> byt
     got = bytearray()
     deadline = time.time() + tmo
     while len(got) < length and time.time() < deadline:
+        if link.dead:
+            break
         chunk = link._fill(min(65536, length - len(got)))
         if chunk:
             got += chunk
@@ -166,38 +186,44 @@ def parse_table(payload: bytes) -> list[dict]:
     return out
 
 
-def handshake(link: SerialLink, retries: int = 3):
+def handshake(link: SerialLink, allow_reset: bool = False, retries: int = 2):
     """HELLO -> MEMORY_DEBUG -> table. Returns (version, table, raw_table).
 
-    Sahara sends exactly one HELLO per reset and whoever reads it consumes it. A
-    device that has been sitting idle for hours therefore has no pending HELLO,
-    which is not a fault. SAHARA_RESET (0x07 - never 0x13, which kills the pipe)
-    asks for a fresh one, and the RESET_RSP that comes back first must be skipped
-    rather than misinterpreted as a failed handshake.
+    Measured on this unit (2026-11-11, twice, plus the vendor tool on the same
+    port): SAHARA_RESET does NOT produce a new HELLO. The packet is emitted once
+    per boot and consumed by whoever reads it first. So a reset is opt-in only
+    (--allow-reset); by default this reports the situation and stops instead of
+    hammering a device that cannot answer.
     """
     pkt = link.read_packet(3.0)
-    for attempt in range(retries):
-        if pkt is not None:
-            break
-        log(f"  nothing pending - SAHARA_RESET to request a fresh HELLO "
-            f"(attempt {attempt + 1}/{retries})")
-        try:
-            link.write(struct.pack("<II", CMD_RESET, 8))
-        except Exception as err:  # noqa: BLE001
-            log(f"  reset not accepted: {type(err).__name__}")
-        # RESET_RSP (0x08) arrives first, then HELLO.
-        for _ in range(4):
-            pkt = link.read_packet(3.0)
-            if pkt is None:
+    if pkt is None and allow_reset:
+        for attempt in range(retries):
+            if link.dead:
                 break
-            c = struct.unpack_from("<I", pkt, 0)[0]
-            if c == CMD_HELLO_REQ:
+            log(f"  nothing pending - SAHARA_RESET (attempt {attempt + 1}/{retries})")
+            try:
+                link.write(struct.pack("<II", CMD_RESET, 8))
+            except Exception as err:  # noqa: BLE001
+                log(f"  reset not accepted: {type(err).__name__}")
                 break
-            if c == CMD_RESET_RSP:
-                continue
-            pkt = None
+            for _ in range(4):
+                pkt = link.read_packet(3.0)
+                if pkt is None:
+                    break
+                c = struct.unpack_from("<I", pkt, 0)[0]
+                if c == CMD_HELLO_REQ:
+                    break
+                if c == CMD_RESET_RSP:
+                    continue
+                pkt = None
+            if pkt is not None:
+                break
     if pkt is None:
-        log("  no HELLO on the port after reset attempts")
+        log("  no HELLO on the port.")
+        log("  This is expected on a 900E node whose HELLO was already read: the")
+        log("  device emits exactly one per boot, and a SAHARA_RESET does not")
+        log("  regenerate it (measured twice, and with the vendor tool as control).")
+        log("  To obtain one: power cycle the tablet, or use a port not yet opened.")
         return None, None, None
     cmd = struct.unpack_from("<I", pkt, 0)[0]
     if cmd == CMD_END_TRANSFER:
@@ -273,6 +299,9 @@ def main() -> int:
                     help="read DDR_DATA and the table first, in that order")
     ap.add_argument("--max", type=int, default=1 << 20,
                     help="per-entry size cap (bytes)")
+    ap.add_argument("--allow-reset", action="store_true",
+                    help="try SAHARA_RESET to provoke a HELLO (measured not to work "
+                         "on this unit; off by default)")
     args = ap.parse_args()
 
     if args.list:
@@ -290,7 +319,7 @@ def main() -> int:
         return 2
 
     try:
-        ver, tables, raw = handshake(link)
+        ver, tables, raw = handshake(link, allow_reset=args.allow_reset)
         if tables is None:
             if raw:
                 (OUT / "memory_table_raw.bin").write_bytes(raw)
