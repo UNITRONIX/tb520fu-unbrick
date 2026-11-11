@@ -89,24 +89,62 @@ healthy device. On this unit the port disappeared between the two.
 
 ## 5. The next attempt, and why it differs
 
-Run them **back to back without an intervening device scan**, from the working
-directory, with the port name resolved live rather than hard-coded. In particular:
+### Update after the power cycle: the COM world survives, and 900E has its own port
+
+After a power cycle the tablet returned as `900E` with the serial driver **still bound**:
 
 ```
-1. switch driver, confirm the COM port number
-2. QSaharaServer with the programmer
-3. fh_loader IMMEDIATELY after, same port
+USB\VID_05C6&PID_900E  service=qcwdfserial  inf=oem61.inf
+Qualcomm HS-USB Diagnostics 900E (COM10)
 ```
 
-and critically:
+So the driver switch persists, and — this is the useful part — **crashdump mode gets its
+own COM port too** (`COM10`, "Diagnostics 900E"). The earlier assumption that only
+`9008` exposes a port was wrong.
 
-- do not run anything else between steps 2 and 3 — no `Get-PnpDevice`, no pyusb scan,
-  no `check_tablet`;
-- run `fh_loader` from a writable directory (it needs to create `port_trace.txt`; the
-  ROM directory under `C:\ProgramData` is not writable, which caused a spurious
-  "Could not append to port_trace.txt" failure on the first try);
-- capture `port_trace.txt` afterwards — it is the most detailed log any tool in this
-  project has produced, and it will say exactly where the session ends.
+`QSaharaServer` then talked to `900E` over COM10 and received a genuine HELLO:
+
+```
+10:44:30: STATE <-- SAHARA_WAIT_HELLO
+10:44:30: Received 8 bytes
+10:44:30: First few bytes: 01 00 00 00 30 00 00 00
+10:44:30: Header indicates command 1 and packet length 48
+```
+
+`01` is `HELLO_REQ`, `0x30` is the 48-byte packet length. **That is the vendor tool
+correctly decoding this device's Sahara handshake over a COM port** — something that had
+never happened in this project.
+
+### And then the same constraint appeared
+
+The immediately following run read `FF FF FF FF FF FF FF FF` and reported:
+
+```
+Header indicates command -1 and packet length -1 bytes
+ERROR: Command packet length -1 too large to fit
+ERROR: Sahara protocol error
+```
+
+`FF FF FF FF` is an empty read. The HELLO had already been consumed by the previous
+invocation. **This is the one-HELLO-per-reset constraint**, now demonstrated against the
+vendor tool as well as against the custom code: it is a property of the device, not of
+the tooling.
+
+That is a genuinely useful confirmation. It means every attempt must be a **single
+first contact** after a fresh cycle.
+
+### The revised procedure
+
+```
+1. power cycle
+2. immediately: QSaharaServer on the 900E COM port with the programmer
+   (or bump with the raw tooling first, then QSaharaServer on the 9008 port)
+3. fh_loader immediately after, same port, nothing in between
+```
+
+The order matters more than anything else measured tonight. One probe, one attempt.
+
+---
 
 ## 6. What not to conclude
 
