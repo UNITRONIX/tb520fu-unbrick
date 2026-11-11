@@ -614,6 +614,75 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def cmd_offcheck(args) -> int:
+    """Decide whether the tablet is genuinely powered off, from the host side.
+
+    The vendor procedure (docs/43) begins with "power off status", and that is the
+    one step nobody can verify: docs/07 sE2 recorded that this tablet "cannot be
+    powered off - power always returns to logo, then crashdump", and every cycle in
+    this repository has been a key-hold reset.
+
+    But the two states are distinguishable by how long the device stays away:
+
+      key-hold reset  -> absent ~15-16 s, then back as 900E
+      genuine off     -> absent indefinitely, and does not come back on its own
+
+    So this watches for absence and reports elapsed time with a verdict. That turns
+    "power off the tablet" from a guess into a measured condition, which is what the
+    procedure actually needs before the key is pressed.
+    """
+    threshold = args.threshold
+    log("=" * 70)
+    log(f"#  offcheck - is the tablet genuinely OFF?")
+    log(f"#  threshold {threshold:.0f}s  (a key-hold reset returns in ~16 s)")
+    log("=" * 70)
+
+    if pids_present():
+        log("  device is PRESENT - not off.")
+        log("  To get an off state: unplug the cable, then hold Power well past the")
+        log("  15 s reset point. Watch this window while you do it.")
+    else:
+        log("  device is already absent; timing the absence now")
+
+    start_absent = None
+    deadline = time.time() + args.seconds
+    verdict_printed = False
+    while time.time() < deadline:
+        present = bool(pids_present())
+        now = time.time()
+        if present:
+            if start_absent is not None:
+                away = now - start_absent
+                log(f"  + BACK after {away:.1f}s - that is a RESET, not an off state")
+                start_absent = None
+                verdict_printed = False
+            time.sleep(0.1)
+            continue
+
+        if start_absent is None:
+            start_absent = now
+            log("  - absent, timing...")
+        away = now - start_absent
+        if not verdict_printed and away >= threshold:
+            log(f"  *** ABSENT for {away:.0f}s - consistent with a GENUINE OFF STATE ***")
+            log("  You can now hold the key and insert the cable.")
+            verdict_printed = True
+        time.sleep(0.1)
+
+    if start_absent is not None:
+        away = time.time() - start_absent
+        verdict = "GENUINE OFF" if away >= threshold else "short gap (probably reset)"
+        log("")
+        log(f"  final: absent {away:.1f}s -> {verdict}")
+        record("offcheck", away=round(away, 1), verdict=verdict)
+        return 0 if away >= threshold else 1
+
+    log("")
+    log("  the device never left the bus during the window")
+    record("offcheck", away=0, verdict="never-absent")
+    return 1
+
+
 def cmd_selftest(_args) -> int:
     """Prove the toolchain works without touching the device's state."""
     log("=" * 70)
@@ -706,6 +775,12 @@ def main() -> int:
     s = sub.add_parser("watch", help="log every USB device appearing/disappearing, no VID filter")
     s.add_argument("--seconds", type=float, default=120)
     s.set_defaults(fn=cmd_watch)
+
+    s = sub.add_parser("offcheck", help="is the tablet genuinely OFF? (times the absence)")
+    s.add_argument("--seconds", type=float, default=120)
+    s.add_argument("--threshold", type=float, default=25.0,
+                   help="absence longer than this is treated as a real off state")
+    s.set_defaults(fn=cmd_offcheck)
 
     args = ap.parse_args()
     return args.fn(args)
