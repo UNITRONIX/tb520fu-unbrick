@@ -531,6 +531,89 @@ def cmd_catch(args) -> int:
             link.close()          # never a reset - see Link.close()
 
 
+def cmd_watch(args) -> int:
+    """Log every USB device that appears or disappears, with no VID filter.
+
+    Why unfiltered: the vendor instruction (docs/43) promises "a COM port", not a
+    particular PID. Every watcher in this repository filtered on VID_05C6, so a
+    node appearing under a different VID - or a composite device with several
+    interfaces - would be invisible exactly when we most need to see it.
+
+    Passive: enumerates the device tree through SetupAPI and touches nothing.
+    """
+    import ctypes
+    import ctypes.wintypes as wt
+
+    DIGCF_PRESENT = 0x02
+    DIGCF_ALLCLASSES = 0x04
+    HDEVINFO = ctypes.c_void_p
+
+    setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
+    setupapi.SetupDiGetClassDevsW.restype = HDEVINFO
+    setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, wt.LPCWSTR,
+                                              ctypes.c_void_p, wt.DWORD]
+    setupapi.SetupDiDestroyDeviceInfoList.argtypes = [HDEVINFO]
+    setupapi.SetupDiEnumDeviceInfo.argtypes = [HDEVINFO, wt.DWORD, ctypes.c_void_p]
+    setupapi.SetupDiGetDeviceInstanceIdW.argtypes = [
+        HDEVINFO, ctypes.c_void_p, wt.LPWSTR, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+
+    class DID(ctypes.Structure):
+        _fields_ = [("cbSize", wt.DWORD), ("ClassGuid", ctypes.c_byte * 16),
+                    ("DevInst", wt.DWORD), ("Reserved", ctypes.c_void_p)]
+
+    def snapshot() -> frozenset[str]:
+        found: set[str] = set()
+        h = setupapi.SetupDiGetClassDevsW(None, None, None,
+                                         DIGCF_PRESENT | DIGCF_ALLCLASSES)
+        if not h:
+            return frozenset()
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            need = wt.DWORD()
+            i = 0
+            while True:
+                d = DID()
+                d.cbSize = ctypes.sizeof(DID)
+                if not setupapi.SetupDiEnumDeviceInfo(h, i, ctypes.byref(d)):
+                    break
+                i += 1
+                if setupapi.SetupDiGetDeviceInstanceIdW(
+                        h, ctypes.byref(d), buf, 1024, ctypes.byref(need)):
+                    s = buf.value
+                    # USB nodes only; PCI/ACPI churn would drown the signal
+                    if s.upper().startswith("USB\\") or "VID_" in s.upper():
+                        found.add(s)
+        finally:
+            setupapi.SetupDiDestroyDeviceInfoList(h)
+        return frozenset(found)
+
+    end = time.time() + args.seconds
+    prev = snapshot()
+    log(f"  baseline: {len(prev)} USB nodes")
+    log(f"  watching {args.seconds:.0f}s - perform the vendor procedure now")
+    log("  (power off, hold Volume Up, connect the cable while holding)")
+    events = 0
+    while time.time() < end:
+        cur = snapshot()
+        if cur != prev:
+            for gone in sorted(prev - cur):
+                log(f"  - GONE    {gone}")
+                events += 1
+            for new in sorted(cur - prev):
+                log(f"  + APPEAR  {new}")
+                events += 1
+            prev = cur
+    log("")
+    if events == 0:
+        log("  no USB device changed during the window")
+    else:
+        log(f"  {events} change(s) recorded")
+    record("watch", events=events, seconds=args.seconds)
+    cp = com_port()
+    log(f"  COM port now: {cp or 'none'}")
+    return 0
+
+
 def cmd_selftest(_args) -> int:
     """Prove the toolchain works without touching the device's state."""
     log("=" * 70)
@@ -619,6 +702,10 @@ def main() -> int:
     s.add_argument("--port", default=None)
     s.add_argument("--seconds", type=float, default=180)
     s.set_defaults(fn=cmd_catch)
+
+    s = sub.add_parser("watch", help="log every USB device appearing/disappearing, no VID filter")
+    s.add_argument("--seconds", type=float, default=120)
+    s.set_defaults(fn=cmd_watch)
 
     args = ap.parse_args()
     return args.fn(args)

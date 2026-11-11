@@ -92,7 +92,33 @@ depend on:
 It depends only on the device being genuinely off, which is a state the owner can
 produce — unlike the other three routes, which each need something nobody has.
 
-## 5. Honest limits
+## 5. First attempt: no change at all
+
+Attempted 2026-11-11 12:33–12:37 with `tablet.py watch`, which enumerates
+**every** USB node with no VID filter, at 2.8 ms per pass.
+
+```
+[  0.011]  baseline: 39 USB nodes
+[240.006]  no USB device changed during the window
+[240.010]  COM port now: COM10
+```
+
+**Interpretation, stated carefully:** the tablet never left the bus during those
+four minutes. A cable that is unplugged and re-plugged - which the procedure
+requires, since the device must be off and then connected - produces at least one
+`- GONE` and one `+ APPEAR`. Neither happened.
+
+So this is a **procedure not executed**, not a procedure that failed. The watcher
+was verified independently first (2.8 ms/pass, 36 nodes enumerated, the tablet
+among them, diff logic checked), because the alternative reading - a blind
+detector - is the exact mistake `docs/32` rule 3 exists to prevent.
+
+**What is needed next:** the tablet actually powered off with the cable out,
+Volume Up held, and the cable inserted while holding. The hard part remains
+`docs/07` §E2: this device has not been observed in a genuine off state since the
+brick, and every cycle so far has been a key-hold reset.
+
+## 6. Honest limits
 
 - **Not tried.** This document records a procedure from the package, nothing more.
 - Whether the tablet can reach a true off state at all is unknown; `docs/07` §E2
@@ -105,7 +131,7 @@ produce — unlike the other three routes, which each need something nobody has.
 - If the device does enumerate, which PID and whether a HELLO is present must both
   be measured — the card only promises a COM port.
 
-## 6. Where this sits in the ranking
+## 7. Where this sits in the ranking
 
 `docs/42` ranks the three known routes by what blocks each. This one changes the
 ranking, because its blocker is the cheapest of all four:

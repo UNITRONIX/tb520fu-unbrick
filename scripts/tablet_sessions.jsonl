@@ -9,3 +9,7 @@
 {"when": "2026-11-11 13:30:29", "event": "catch", "ok": false, "reason": "no-port"}
 {"when": "2026-11-11 13:32:00", "event": "catch", "ok": false, "reason": "timeout", "deaths": 0}
 {"when": "2026-11-11 13:32:05", "event": "status", "pids": {"USB\\VID_05C6&PID_900E\\B6F2DE0A": "900E"}, "com": "COM10"}
+{"when": "2026-11-11 13:33:13", "event": "status", "pids": {"USB\\VID_05C6&PID_900E\\B6F2DE0A": "900E"}, "com": "COM10"}
+{"when": "2026-11-11 13:33:25", "event": "watch", "events": 0, "seconds": 5.0}
+{"when": "2026-11-11 13:37:37", "event": "watch", "events": 0, "seconds": 240.0}
+{"when": "2026-11-11 13:37:42", "event": "status", "pids": {"USB\\VID_05C6&PID_900E\\B6F2DE0A": "900E"}, "com": "COM10"}
